@@ -1,0 +1,60 @@
+{
+  "upstox": {
+    "apiKey": "your_sandbox_api_key",
+    "apiSecret": "your_sandbox_api_secret",
+    "redirectUri": "http://localhost:8080/callback",
+    "accessToken": "your_access_token",
+    "baseUrl": "https://api.upstox.com/v2",
+    "sandboxUrl": "https://api-hft.upstox.com",
+    "useSandbox": true
+  },
+  "trading": {
+    "capital": 100000,
+    "dailyLossLimitPercent": 2,
+    "maxTradesPerDay": 2,
+    "instruments": ["NIFTY", "BANKNIFTY"],
+    "marketOpen": "09:15",
+    "marketClose": "15:30",
+    "openingRangeDuration": 15,
+    "lastEntryTime": "14:45",
+    "hardExitTime": "15:15",
+    "instrumentType": "OPTIONS",
+    "riskPerTradePercent": 2
+  },
+  "strategy": {
+    "stopLossPercent": 0.5,
+    "targetPercent": 2.0,
+    "useTrailingStop": true,
+    "trailingStopPercent": 0.5
+  },
+  "goldenRatio": {
+    "enabled": true,
+    "fibonacciLevel": 0.618,
+    "stopLossPercent": 0.5,
+    "targetPercent": 2.0,
+    "useTrailingStop": false
+  },
+  "backtest": {
+    "startDate": "2024-02-01",
+    "endDate": "2024-07-31",
+    "dataSource": "upstox",
+    "interval": "1minute",
+    "trainTestSplit": 0.7,
+    "strategies": ["ORB", "GOLDEN_RATIO"]
+  },
+  "alerts": {
+    "telegram": {
+      "enabled": false,
+      "botToken": "",
+      "chatId": ""
+    },
+    "discord": {
+      "enabled": false,
+      "webhookUrl": ""
+    }
+  },
+  "logging": {
+    "level": "info",
+    "directory": "./logs"
+  }
+}
