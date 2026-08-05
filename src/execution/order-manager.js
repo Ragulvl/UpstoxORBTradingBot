@@ -10,7 +10,8 @@
 import crypto from 'crypto';
 
 class OrderManager {
-  constructor(upstoxClient, logger) {
+  constructor(config, upstoxClient, logger) {
+    this.config = config;
     this.upstoxClient = upstoxClient;
     this.logger = logger;
     this.activeOrders = new Map(); // orderId -> order details

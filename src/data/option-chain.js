@@ -13,19 +13,112 @@ export class OptionChainFetcher {
     this.upstoxClient = upstoxClient;
     this.cache = new Map(); // instrumentKey -> last quote data
     this.cacheTimeout = 5000; // 5 seconds cache
+    this.useMock = config.websocket?.useMock || false;
+    
+    if (this.useMock) {
+      logger.info('⚠️  OptionChainFetcher initialized in MOCK mode');
+    }
+  }
+
+  /**
+   * Generate mock option quote for virtual trading
+   */
+  generateMockOptionQuote(instrumentKey, spotPrice) {
+    // Parse instrument key to get strike and type
+    // Format: NSE_FO|NIFTY2026081122500PE or similar
+    const match = instrumentKey.match(/(\d+)(CE|PE)$/);
+    
+    if (!match) {
+      logger.error('Could not parse instrument key for mock quote', { instrumentKey });
+      throw new Error('Invalid instrument key format');
+    }
+    
+    const strike = parseInt(match[1]);
+    const optionType = match[2]; // CE or PE
+    
+    // Calculate intrinsic value
+    const intrinsicValue = optionType === 'CE'
+      ? Math.max(0, spotPrice - strike)
+      : Math.max(0, strike - spotPrice);
+    
+    // Calculate time value (simplified - typically would use Black-Scholes)
+    const distanceFromStrike = Math.abs(spotPrice - strike);
+    const timeValue = Math.max(10, 50 - (distanceFromStrike / 50)); // Decreases with distance
+    
+    // Total premium
+    const premium = intrinsicValue + timeValue;
+    
+    // Add small bid-ask spread (0.5% of premium)
+    const spread = premium * 0.005;
+    const midPrice = premium;
+    const bidPrice = midPrice - (spread / 2);
+    const askPrice = midPrice + (spread / 2);
+    
+    const mockQuote = {
+      instrumentKey,
+      ltp: midPrice,
+      open: midPrice * 0.98,
+      high: midPrice * 1.02,
+      low: midPrice * 0.97,
+      close: midPrice,
+      prevClose: midPrice * 0.99,
+      change: midPrice * 0.01,
+      changePercent: 1.0,
+      volume: 1000000,
+      bidPrice: parseFloat(bidPrice.toFixed(2)),
+      askPrice: parseFloat(askPrice.toFixed(2)),
+      bidQty: 500,
+      askQty: 500,
+      spread: parseFloat(spread.toFixed(2)),
+      spreadPercent: '0.50',
+      midPrice: parseFloat(midPrice.toFixed(2)),
+      timestamp: new Date().toISOString(),
+      oi: 50000,
+      oiChange: 1000,
+      _mock: true
+    };
+    
+    logger.debug('Generated mock option quote', {
+      instrumentKey,
+      spotPrice,
+      strike,
+      optionType,
+      intrinsicValue: intrinsicValue.toFixed(2),
+      timeValue: timeValue.toFixed(2),
+      premium: midPrice.toFixed(2)
+    });
+    
+    return mockQuote;
   }
 
   /**
    * Get option chain for an instrument
    * Uses Upstox Market Quote API
    */
-  async getOptionQuote(instrumentKey) {
+  async getOptionQuote(instrumentKey, spotPrice = null) {
     try {
       // Check cache first
       const cached = this.getCached(instrumentKey);
       if (cached) {
         logger.debug('Using cached option quote', { instrumentKey });
         return cached;
+      }
+
+      // If in mock mode, generate synthetic quote
+      if (this.useMock) {
+        if (!spotPrice) {
+          throw new Error('Spot price required for mock option quote generation');
+        }
+        
+        const mockQuote = this.generateMockOptionQuote(instrumentKey, spotPrice);
+        
+        // Cache the result
+        this.cache.set(instrumentKey, {
+          data: mockQuote,
+          timestamp: Date.now()
+        });
+        
+        return mockQuote;
       }
 
       const baseUrl = this.config.upstox.useSandbox 
@@ -312,14 +405,59 @@ export class OptionChainFetcher {
         timeout: 5000
       });
 
+      // Log full response for debugging (first time only)
+      if (!this._loggedResponse) {
+        logger.info('Market quote API response structure', {
+          status: response.data?.status,
+          dataKeys: response.data?.data ? Object.keys(response.data.data) : [],
+          sampleData: response.data?.data ? JSON.stringify(response.data.data).substring(0, 500) : null
+        });
+        this._loggedResponse = true;
+      }
+
       if (response.data && response.data.status === 'success') {
-        const data = response.data.data[instrumentKey];
+        // The response uses colon (:) in keys but subscription uses pipe (|)
+        // Try both formats
+        let data = response.data.data[instrumentKey];
+        
+        if (!data) {
+          // Try with colon instead of pipe
+          const alternateKey = instrumentKey.replace('|', ':');
+          data = response.data.data[alternateKey];
+          
+          if (data) {
+            logger.debug('Found data with alternate key format', {
+              requested: instrumentKey,
+              found: alternateKey
+            });
+          }
+        }
+        
+        if (!data) {
+          logger.error('Instrument data not found in response', {
+            instrumentKey,
+            availableKeys: Object.keys(response.data.data || {})
+          });
+          throw new Error(`No data for instrument: ${instrumentKey}`);
+        }
+        
+        // Try different field names for LTP
+        const ltp = data.last_price || data.ltp || data.ohlc?.close || 0;
+        
+        if (ltp === 0) {
+          logger.warn('LTP is zero or missing - response structure may have changed', {
+            dataKeys: Object.keys(data),
+            sample: JSON.stringify(data).substring(0, 200)
+          });
+        }
+        
         return {
           symbol,
-          ltp: data.last_price,
-          change: data.net_change || 0,
-          changePercent: data.change_percent || 0,
-          timestamp: new Date().toISOString()
+          ltp,
+          change: data.net_change || data.change || 0,
+          changePercent: data.change_percent || data.change_percentage || 0,
+          timestamp: new Date().toISOString(),
+          _rawKeys: Object.keys(data) // For debugging
         };
       } else {
         throw new Error('Invalid response from market quote API');

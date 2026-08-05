@@ -5,16 +5,31 @@ class UpstoxClient {
   constructor(config, logger) {
     this.config = config;
     this.logger = logger;
-    this.baseUrl = config.upstox.useSandbox 
-      ? config.upstox.sandboxUrl 
-      : config.upstox.baseUrl;
-    this.accessToken = config.upstox.accessToken;
+    
+    // Split URLs: production for market data, sandbox for orders
+    this.productionUrl = config.upstox.baseUrl || 'https://api.upstox.com/v2';
+    this.sandboxUrl = config.upstox.orders?.sandboxUrl || config.upstox.sandboxUrl || 'https://api-hft.upstox.com';
+    
+    // Split tokens: production for market data, sandbox for orders
+    this.productionToken = config.upstox.marketData?.accessToken || config.upstox.accessToken;
+    this.sandboxToken = config.upstox.orders?.accessToken || config.upstox.accessToken;
+    
+    // Whether to use sandbox for orders
+    this.useSandboxForOrders = config.upstox.orders?.useSandbox !== false;
+    
+    this.logger.info('UpstoxClient initialized', {
+      productionUrl: this.productionUrl,
+      sandboxUrl: this.sandboxUrl,
+      useSandboxForOrders: this.useSandboxForOrders,
+      hasProductionToken: !!this.productionToken,
+      hasSandboxToken: !!this.sandboxToken
+    });
   }
 
   getHeaders(isOrder = false) {
     const headers = {
       'Accept': 'application/json',
-      'Authorization': `Bearer ${this.accessToken}`
+      'Authorization': `Bearer ${isOrder && this.useSandboxForOrders ? this.sandboxToken : this.productionToken}`
     };
 
     if (isOrder) {
@@ -22,6 +37,10 @@ class UpstoxClient {
     }
 
     return headers;
+  }
+  
+  getBaseUrl(isOrder = false) {
+    return (isOrder && this.useSandboxForOrders) ? this.sandboxUrl : this.productionUrl;
   }
 
   async getHistoricalData(instrument, interval, fromDate, toDate) {
@@ -32,8 +51,7 @@ class UpstoxClient {
         toDate
       });
 
-      // IMPORTANT: Historical data is NOT on sandbox - use production API
-      // Even for sandbox projects, historical data is read-only and safe
+      // IMPORTANT: Historical data is read-only market data - always use production API
       const productionBaseUrl = 'https://api.upstox.com';
       
       // Upstox V3 historical data endpoint format:
@@ -46,10 +64,10 @@ class UpstoxClient {
       
       const url = `${productionBaseUrl}/v3/historical-candle/${instrumentKey}/minutes/${intervalMinutes}/${toDate}/${fromDate}`;
 
-      this.logger.debug('Historical data request', { url });
+      this.logger.debug('Historical data request (production)', { url });
 
       const response = await axios.get(url, {
-        headers: this.getHeaders()
+        headers: this.getHeaders(false) // Use production token
       });
 
       if (response.data.status === 'success') {
@@ -95,11 +113,11 @@ class UpstoxClient {
 
   async getInstrumentMaster() {
     try {
-      this.logger.info('Fetching instrument master');
+      this.logger.info('Fetching instrument master (production)');
       
-      const url = `${this.baseUrl}/market-quote/instruments`;
+      const url = `${this.getBaseUrl(false)}/market-quote/instruments`;
       const response = await axios.get(url, {
-        headers: this.getHeaders()
+        headers: this.getHeaders(false) // Use production token
       });
 
       return response.data;
@@ -113,11 +131,11 @@ class UpstoxClient {
 
   async getOptionChain(symbol, expiryDate) {
     try {
-      this.logger.info(`Fetching option chain for ${symbol}`, { expiryDate });
+      this.logger.info(`Fetching option chain for ${symbol} (production)`, { expiryDate });
       
-      const url = `${this.baseUrl}/option-chain`;
+      const url = `${this.getBaseUrl(false)}/option-chain`;
       const response = await axios.get(url, {
-        headers: this.getHeaders(),
+        headers: this.getHeaders(false), // Use production token
         params: {
           instrument_key: this.getInstrumentKey(symbol),
           expiry_date: expiryDate
@@ -136,13 +154,16 @@ class UpstoxClient {
 
   async placeOrder(orderParams) {
     try {
-      this.logger.info('Placing order', { orderParams });
+      this.logger.info('Placing order (sandbox)', { 
+        orderParams,
+        url: this.getBaseUrl(true)
+      });
       
-      // Use sandbox endpoint for orders
-      const url = `${this.baseUrl}/order/place`;
+      // Use sandbox endpoint and token for orders
+      const url = `${this.getBaseUrl(true)}/order/place`;
       
       const response = await axios.post(url, orderParams, {
-        headers: this.getHeaders(true)
+        headers: this.getHeaders(true) // Use sandbox token
       });
 
       this.logger.order('Order placed', {
@@ -154,7 +175,8 @@ class UpstoxClient {
     } catch (error) {
       this.logger.error('Error placing order', {
         orderParams,
-        error: error.message
+        error: error.message,
+        response: error.response?.data
       });
       throw error;
     }
@@ -162,15 +184,15 @@ class UpstoxClient {
 
   async modifyOrder(orderId, modifications) {
     try {
-      this.logger.info('Modifying order', { orderId, modifications });
+      this.logger.info('Modifying order (sandbox)', { orderId, modifications });
       
-      const url = `${this.baseUrl}/order/modify`;
+      const url = `${this.getBaseUrl(true)}/order/modify`;
       
       const response = await axios.put(url, {
         order_id: orderId,
         ...modifications
       }, {
-        headers: this.getHeaders(true)
+        headers: this.getHeaders(true) // Use sandbox token
       });
 
       this.logger.order('Order modified', { orderId, modifications });
@@ -179,7 +201,8 @@ class UpstoxClient {
     } catch (error) {
       this.logger.error('Error modifying order', {
         orderId,
-        error: error.message
+        error: error.message,
+        response: error.response?.data
       });
       throw error;
     }
@@ -187,12 +210,12 @@ class UpstoxClient {
 
   async cancelOrder(orderId) {
     try {
-      this.logger.info('Cancelling order', { orderId });
+      this.logger.info('Cancelling order (sandbox)', { orderId });
       
-      const url = `${this.baseUrl}/order/cancel`;
+      const url = `${this.getBaseUrl(true)}/order/cancel`;
       
       const response = await axios.delete(url, {
-        headers: this.getHeaders(true),
+        headers: this.getHeaders(true), // Use sandbox token
         data: { order_id: orderId }
       });
 
@@ -202,7 +225,8 @@ class UpstoxClient {
     } catch (error) {
       this.logger.error('Error cancelling order', {
         orderId,
-        error: error.message
+        error: error.message,
+        response: error.response?.data
       });
       throw error;
     }
@@ -210,10 +234,10 @@ class UpstoxClient {
 
   async getOrderStatus(orderId) {
     try {
-      const url = `${this.baseUrl}/order/history`;
+      const url = `${this.getBaseUrl(true)}/order/history`;
       
       const response = await axios.get(url, {
-        headers: this.getHeaders(),
+        headers: this.getHeaders(true), // Use sandbox token
         params: { order_id: orderId }
       });
 
@@ -221,7 +245,8 @@ class UpstoxClient {
     } catch (error) {
       this.logger.error('Error getting order status', {
         orderId,
-        error: error.message
+        error: error.message,
+        response: error.response?.data
       });
       throw error;
     }
@@ -229,16 +254,17 @@ class UpstoxClient {
 
   async getPositions() {
     try {
-      const url = `${this.baseUrl}/portfolio/short-term-positions`;
+      const url = `${this.getBaseUrl(true)}/portfolio/short-term-positions`;
       
       const response = await axios.get(url, {
-        headers: this.getHeaders()
+        headers: this.getHeaders(true) // Use sandbox token
       });
 
       return response.data;
     } catch (error) {
       this.logger.error('Error getting positions', {
-        error: error.message
+        error: error.message,
+        response: error.response?.data
       });
       throw error;
     }

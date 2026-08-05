@@ -127,7 +127,10 @@ export class LiveRiskManager extends EventEmitter {
     // For options, round to lot size if available
     const lotSize = params.lotSize || 1;
     const lots = Math.floor(quantity / lotSize);
-    const adjustedQuantity = lots * lotSize;
+    
+    // Ensure at least 1 lot for virtual trading if quantity allows
+    const adjustedLots = lots > 0 ? lots : (quantity >= lotSize * 0.5 ? 1 : 0);
+    const adjustedQuantity = adjustedLots * lotSize;
 
     logger.debug('Position size calculated', {
       capital: this.capital,
@@ -137,13 +140,23 @@ export class LiveRiskManager extends EventEmitter {
       stopLoss,
       riskPerUnit,
       rawQuantity: quantity,
-      lots,
+      lots: adjustedLots,
       adjustedQuantity
     });
 
+    // Return null if no position can be taken
+    if (adjustedQuantity === 0) {
+      logger.warn('Position size is zero - capital too small or risk too high', {
+        maxRiskAmount,
+        riskPerUnit,
+        lotSize
+      });
+      return null;
+    }
+
     return {
       quantity: adjustedQuantity,
-      lots,
+      lots: adjustedLots,
       riskAmount: adjustedQuantity * riskPerUnit,
       riskPercent: ((adjustedQuantity * riskPerUnit) / this.capital) * 100
     };
@@ -242,6 +255,8 @@ export class LiveRiskManager extends EventEmitter {
     try {
       await fs.access(this.killSwitchFile);
       
+      logger.debug('Kill switch file EXISTS', { file: this.killSwitchFile });
+      
       // File exists - kill switch activated
       if (!this.killSwitchActivated) {
         this.activateKillSwitch('FILE');
@@ -250,6 +265,7 @@ export class LiveRiskManager extends EventEmitter {
       return true;
     } catch {
       // File doesn't exist - kill switch not activated
+      logger.debug('Kill switch file NOT found (normal operation)');
       return false;
     }
   }

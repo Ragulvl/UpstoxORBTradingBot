@@ -141,16 +141,31 @@ export class BotEngine extends EventEmitter {
    * Start kill switch monitoring
    */
   startKillSwitchMonitoring() {
+    logger.info('Starting kill switch monitoring (checking every 5 seconds)');
+    
     // Check kill switch every 5 seconds
     this.killSwitchCheckInterval = setInterval(async () => {
       if (!this.isRunning) return;
 
+      logger.debug('Checking kill switch file...');
       const activated = await this.riskManager.checkKillSwitch();
+      
       if (activated) {
         logger.error('🛑 Kill switch detected - stopping bot');
         await this.stop();
+        
+        // Exit the process after a short delay to allow cleanup
+        setTimeout(() => {
+          logger.info('🛑 Process exiting due to kill switch');
+          process.exit(0);
+        }, 1000);
       }
     }, 5000);
+    
+    logger.info('Kill switch monitoring started', {
+      interval: '5 seconds',
+      file: this.riskManager.killSwitchFile
+    });
   }
 
   /**
@@ -179,6 +194,10 @@ export class BotEngine extends EventEmitter {
     } else if (this.state === 'CALCULATING_OR') {
       await this.checkOpeningRangeComplete();
     } else if (this.state === 'MONITORING') {
+      // Check if OR was missed (late start scenario)
+      if (!this.openingRange) {
+        await this.checkOpeningRangeComplete();
+      }
       await this.checkHardExitTime();
     }
   }
@@ -242,9 +261,11 @@ export class BotEngine extends EventEmitter {
       
       this.spotPrice = spotData.ltp;
       
-      logger.debug('Spot price updated', {
+      logger.info('🔴 SPOT PRICE UPDATED FROM REST API', {
+        source: 'REST_API',
         underlying,
-        ltp: this.spotPrice
+        ltp: this.spotPrice,
+        method: 'updateSpotPrice()'
       });
     } catch (error) {
       logger.error('Failed to update spot price', {
@@ -268,7 +289,10 @@ export class BotEngine extends EventEmitter {
     const orEndMin = openMin + openingRangeDuration;
     const orEndTime = `${openHour.toString().padStart(2, '0')}:${orEndMin.toString().padStart(2, '0')}`;
     
-    if (currentTime >= orEndTime && !this.openingRange) {
+    // Check if we have enough candles even if past OR time (for late starts)
+    const hasEnoughCandles = this.candleHistory.getRecentCandles(openingRangeDuration).length >= openingRangeDuration;
+    
+    if ((currentTime >= orEndTime || hasEnoughCandles) && !this.openingRange) {
       await this.calculateOpeningRange();
       await this.transitionTo('MONITORING');
     }
@@ -351,6 +375,14 @@ export class BotEngine extends EventEmitter {
     // Update spot price from candle
     if (candle.close) {
       this.spotPrice = candle.close;
+      
+      logger.info('🟢 SPOT PRICE UPDATED FROM WEBSOCKET CANDLE', {
+        source: 'WEBSOCKET_TICK',
+        ltp: this.spotPrice,
+        candleMinute: candle.minute,
+        tickCount: candle.tickCount,
+        method: 'onCandleComplete()'
+      });
     }
 
     // Check for entry signal if monitoring
@@ -430,8 +462,11 @@ export class BotEngine extends EventEmitter {
 
       this.selectedInstrument = instrument;
 
-      // Get option quote
-      const quote = await this.optionChain.getOptionQuote(instrument.instrumentKey);
+      // Get option quote (pass spot price for mock mode)
+      const quote = await this.optionChain.getOptionQuote(
+        instrument.instrumentKey,
+        this.spotPrice
+      );
 
       // Check liquidity
       const liquidity = this.optionChain.checkLiquidity(quote);
@@ -497,9 +532,12 @@ export class BotEngine extends EventEmitter {
   async updatePosition(candle) {
     if (!this.currentPosition) return;
 
-    // Get current option price
+    // Get current option price (pass spot price for mock mode)
     try {
-      const quote = await this.optionChain.getOptionQuote(this.selectedInstrument.instrumentKey);
+      const quote = await this.optionChain.getOptionQuote(
+        this.selectedInstrument.instrumentKey,
+        this.spotPrice
+      );
       
       this.positionTracker.updatePosition(
         this.currentPosition.id,
@@ -557,8 +595,11 @@ export class BotEngine extends EventEmitter {
     }
 
     try {
-      // Get current quote for exit
-      const quote = await this.optionChain.getOptionQuote(this.selectedInstrument.instrumentKey);
+      // Get current quote for exit (pass spot price for mock mode)
+      const quote = await this.optionChain.getOptionQuote(
+        this.selectedInstrument.instrumentKey,
+        this.spotPrice
+      );
 
       // Close position (placeholder - would use actual order manager)
       logger.info('Closing position', {

@@ -12,6 +12,7 @@ import TradeJournal from './trade-journal.js';
 import LiveRiskManager from '../risk/live-risk-manager.js';
 import SessionManager from './session-manager.js';
 import BotEngine from './bot-engine.js';
+import StateExporter from './state-exporter.js';
 
 /**
  * Main Live Bot Runner
@@ -61,7 +62,7 @@ class LiveBotRunner {
 
       // 4. Initialize Upstox Client
       logger.info('Initializing Upstox client...');
-      this.components.upstoxClient = new UpstoxClient(this.config);
+      this.components.upstoxClient = new UpstoxClient(this.config, logger);
       logger.info('✅ Upstox client initialized');
 
       // 5. Initialize Option Chain Fetcher
@@ -76,7 +77,8 @@ class LiveBotRunner {
       logger.info('Initializing order manager...');
       this.components.orderManager = new OrderManager(
         this.config,
-        this.components.upstoxClient
+        this.components.upstoxClient,
+        logger
       );
       logger.info('✅ Order manager initialized');
 
@@ -121,10 +123,21 @@ class LiveBotRunner {
 
       // 12. Initialize WebSocket Client
       logger.info('Initializing WebSocket client...');
-      this.components.wsClient = new UpstoxWebSocketClient(
-        this.config.upstox.accessToken,
-        this.config.websocket || {}
-      );
+      
+      // Use production token/URL for market data (even in sandbox mode)
+      const wsToken = this.config.upstox.marketData?.accessToken || this.config.upstox.accessToken;
+      const wsConfig = {
+        ...this.config.websocket,
+        url: this.config.upstox.marketData?.websocketUrl || this.config.websocket?.url
+      };
+      
+      this.components.wsClient = new UpstoxWebSocketClient(wsToken, wsConfig);
+      
+      logger.info('WebSocket configuration', {
+        useMock: wsConfig.useMock,
+        useProductionData: !!this.config.upstox.marketData?.useProduction,
+        url: wsConfig.url
+      });
 
       // Connect WebSocket to Candle Builder
       this.components.wsClient.on('tick', (tick) => {
@@ -138,6 +151,14 @@ class LiveBotRunner {
       this.components.config = this.config; // Add config to components
       this.components.botEngine = new BotEngine(this.components);
       logger.info('✅ Bot engine initialized');
+
+      // 14. Initialize State Exporter (for dashboard)
+      logger.info('Initializing state exporter for dashboard...');
+      this.components.stateExporter = new StateExporter(
+        this.components.botEngine,
+        this.components
+      );
+      logger.info('✅ State exporter initialized');
 
       logger.info('='.repeat(60));
       logger.info('✅ All components initialized successfully');
@@ -175,17 +196,30 @@ class LiveBotRunner {
       await this.components.wsClient.connect();
       logger.info('✅ WebSocket connected');
 
-      // Subscribe to NIFTY spot
+      // Subscribe to multiple instruments for better tick coverage
       const underlying = this.config.trading.instruments[0] || 'NIFTY';
-      const spotKey = `NSE_INDEX|Nifty 50`; // Upstox instrument key for NIFTY spot
+      const niftyKey = `NSE_INDEX|Nifty 50`; // NIFTY spot
+      const relianceKey = `NSE_EQ|INE002A01018`; // RELIANCE stock (high volume)
       
-      logger.info('Subscribing to market data...', { underlying, spotKey });
-      this.components.wsClient.subscribe([spotKey]);
-      logger.info('✅ Subscribed to market data');
+      logger.info('Subscribing to market data...', { 
+        underlying, 
+        niftyKey,
+        relianceKey: 'NSE_EQ|INE002A01018 (RELIANCE - for tick verification)'
+      });
+      
+      // Subscribe to both NIFTY and RELIANCE
+      // RELIANCE trades much more frequently and will generate live_feed messages
+      this.components.wsClient.subscribe([niftyKey, relianceKey]);
+      
+      logger.info('✅ Subscribed to market data (NIFTY + RELIANCE for tick verification)');
 
       // Start Bot Engine
       await this.components.botEngine.start();
       logger.info('✅ Bot engine started');
+
+      // Start State Exporter (for dashboard)
+      this.components.stateExporter.start();
+      logger.info('✅ State exporter started - dashboard can now read bot status');
 
       // Log status
       this.logStatus();
@@ -230,6 +264,12 @@ class LiveBotRunner {
       if (this.components.botEngine) {
         await this.components.botEngine.stop();
         logger.info('✅ Bot engine stopped');
+      }
+
+      // Stop state exporter
+      if (this.components.stateExporter) {
+        this.components.stateExporter.stop();
+        logger.info('✅ State exporter stopped');
       }
 
       // Disconnect WebSocket
@@ -354,7 +394,11 @@ async function main() {
 }
 
 // Run if executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Use fileURLToPath for proper cross-platform path comparison
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+
+if (process.argv[1] === __filename) {
   main();
 }
 

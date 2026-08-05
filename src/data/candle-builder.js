@@ -77,13 +77,15 @@ export class CandleBuilder extends EventEmitter {
       volume: volume,
       tickCount: 1,
       firstTick: tick.timestamp || new Date().toISOString(),
-      instrumentKey: tick.instrument_key || tick.symbol
+      instrumentKey: tick.instrumentKey || tick.instrument_key || tick.symbol
     };
     
-    logger.debug('Started new candle', {
+    logger.info('🔵 NEW CANDLE STARTED FROM WEBSOCKET TICK', {
       minute,
       open: price,
-      instrument: this.currentCandle.instrumentKey
+      ltp: price,
+      instrument: this.currentCandle.instrumentKey,
+      hasRawData: !!tick._raw
     });
   }
 

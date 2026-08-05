@@ -61,14 +61,24 @@ The bot will:
 - `logs/trades/trades_YYYY-MM-DD.json` - Trade data (programmatic)
 - `logs/trades/summary_daily_YYYY-MM-DD.txt` - Daily summary
 
-**Real-time:**
-```bash
-# Watch main log
-type logs\main_2026-07-31.log
+**Professional Dashboard** (Recommended):
 
-# View trades CSV
-type logs\trades\trades_2026-07-31.csv
+Open a **second terminal** and run:
+```bash
+npm run dashboard
 ```
+
+Then open browser: **http://localhost:3000**
+
+**Dashboard Features:**
+- 📊 Real-time bot status and current position
+- 📈 Performance metrics (raw vs cost-adjusted)
+- 💰 Cost analysis - The Phase 2 critical metric
+- 📋 Complete trade log with CSV export
+- 🛡️ Risk monitoring and emergency kill switch
+- Auto-refreshes every 30 seconds
+
+**See `DASHBOARD_QUICKSTART.md` for detailed setup**
 
 ---
 

@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ Upstox ORB Bot - Live Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>⚡ Upstox ORB Trading Bot</h1>
+            <p class="subtitle">Real-Time Monitoring Dashboard • Phase 2 Validation • Live Market Data</p>
+        </header>
+
+        <!-- Live Status Bar -->
+        <section class="status-bar">
+            <div class="status-item">
+                <span class="label">Bot Status:</span>
+                <span id="bot-status" class="value status-unknown">Unknown</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Market Session:</span>
+                <span id="market-session" class="value">Loading...</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Next Event:</span>
+                <span id="next-event" class="value">Loading...</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Last Update:</span>
+                <span id="last-update" class="value">Never</span>
+            </div>
+        </section>
+
+        <!-- Real-Time Market View -->
+        <section class="panel market-view-panel">
+            <h2>📊 Real-Time Market View - NIFTY 50</h2>
+            
+            <div class="market-header">
+                <div class="spot-price-display">
+                    <div class="spot-label">Current Spot Price</div>
+                    <div id="spot-price" class="spot-price">--,---</div>
+                    <div id="spot-change" class="spot-change">---</div>
+                </div>
+                
+                <div class="data-source-indicator">
+                    <div id="data-source" class="data-source">
+                        <span class="indicator-dot" id="ws-indicator"></span>
+                        <span id="source-text">Connecting...</span>
+                    </div>
+                    <div class="last-tick">Last tick: <span id="last-tick-time">--:--:--</span></div>
+                </div>
+            </div>
+
+            <div class="chart-container-large">
+                <canvas id="price-chart"></canvas>
+            </div>
+
+            <div class="opening-range-display" id="or-display" style="display: none;">
+                <h3>Opening Range (9:15-9:30 AM)</h3>
+                <div class="or-grid">
+                    <div class="or-item">
+                        <span class="label">High:</span>
+                        <span id="or-high" class="value">---</span>
+                    </div>
+                    <div class="or-item">
+                        <span class="label">Low:</span>
+                        <span id="or-low" class="value">---</span>
+                    </div>
+                    <div class="or-item">
+                        <span class="label">Range:</span>
+                        <span id="or-range" class="value">---</span>
+                    </div>
+                </div>
+                
+                <h3>Golden Ratio Breakout Levels</h3>
+                <div class="gr-grid">
+                    <div class="gr-item long">
+                        <span class="label">📈 CALL Entry:</span>
+                        <span id="gr-long" class="value">---</span>
+                    </div>
+                    <div class="gr-item short">
+                        <span class="label">📉 PUT Entry:</span>
+                        <span id="gr-short" class="value">---</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Current Position -->
+        <section class="panel position-panel" id="position-panel" style="display: none;">
+            <h2>📊 Current Position</h2>
+            <div class="position-grid">
+                <div class="position-item">
+                    <span class="label">Instrument:</span>
+                    <span id="pos-instrument" class="value">-</span>
+                </div>
+                <div class="position-item">
+                    <span class="label">Direction:</span>
+                    <span id="pos-direction" class="value">-</span>
+                </div>
+                <div class="position-item">
+                    <span class="label">Entry Price:</span>
+                    <span id="pos-entry" class="value">-</span>
+                </div>
+                <div class="position-item">
+                    <span class="label">Current Price:</span>
+                    <span id="pos-current" class="value">-</span>
+                </div>
+                <div class="position-item">
+                    <span class="label">P&L:</span>
+                    <span id="pos-pnl" class="value">-</span>
+                </div>
+                <div class="position-item">
+                    <span class="label">Time Held:</span>
+                    <span id="pos-duration" class="value">-</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Risk & Safety Panel -->
+        <section class="panel risk-panel">
+            <h2>🛡️ Risk & Safety</h2>
+            
+            <div class="risk-item">
+                <div class="risk-header">
+                    <span class="label">Daily Loss Limit</span>
+                    <span id="daily-loss-value" class="value">₹0 / ₹2,000 (0.0%)</span>
+                </div>
+                <div class="progress-bar">
+                    <div id="daily-loss-progress" class="progress-fill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="risk-item">
+                <div class="risk-header">
+                    <span class="label">Trades Today</span>
+                    <span id="trades-count-value" class="value">0 / 2</span>
+                </div>
+                <div class="progress-bar">
+                    <div id="trades-count-progress" class="progress-fill" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="risk-item">
+                <span class="label">Circuit Breaker:</span>
+                <span id="circuit-breaker" class="status-ok">ARMED</span>
+            </div>
+
+            <div class="kill-switch-container">
+                <button id="kill-switch-btn" class="kill-switch-btn">
+                    🛑 KILL SWITCH
+                </button>
+                <p class="kill-switch-info">Emergency stop - closes positions and stops bot</p>
+            </div>
+        </section>
+
+        <!-- Performance Summary -->
+        <section class="panel performance-panel">
+            <h2>📈 Performance Summary</h2>
+            
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>Total Trades</h3>
+                    <div class="metric-value" id="total-trades">0</div>
+                    <div class="metric-subtext">
+                        <span id="total-wins">0</span> wins / <span id="total-losses">0</span> losses
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Win Rate</h3>
+                    <div class="metric-comparison">
+                        <div>
+                            <div class="metric-label">Raw</div>
+                            <div class="metric-value" id="win-rate-raw">0%</div>
+                        </div>
+                        <div>
+                            <div class="metric-label">Cost-Adj</div>
+                            <div class="metric-value" id="win-rate-adjusted">0%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Profit Factor</h3>
+                    <div class="metric-comparison">
+                        <div>
+                            <div class="metric-label">Raw</div>
+                            <div class="metric-value" id="profit-factor-raw">0.00</div>
+                        </div>
+                        <div>
+                            <div class="metric-label">Cost-Adj</div>
+                            <div class="metric-value" id="profit-factor-adjusted">0.00</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <h3>Total P&L</h3>
+                    <div class="metric-comparison">
+                        <div>
+                            <div class="metric-label">Raw</div>
+                            <div class="metric-value" id="pnl-raw">₹0</div>
+                        </div>
+                        <div>
+                            <div class="metric-label">Cost-Adj</div>
+                            <div class="metric-value" id="pnl-adjusted">₹0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Equity Curve</h3>
+                <canvas id="equity-chart"></canvas>
+            </div>
+        </section>
+
+        <!-- Cost Analysis Panel -->
+        <section class="panel cost-panel">
+            <h2>💰 Cost Analysis - Phase 2 Key Metric</h2>
+            
+            <div class="cost-metrics">
+                <div class="cost-metric">
+                    <span class="label">Avg Cost per Trade:</span>
+                    <span id="avg-cost-percent" class="value">0%</span>
+                    <span class="subtext">of raw P&L</span>
+                </div>
+                
+                <div class="cost-metric">
+                    <span class="label">Total Costs:</span>
+                    <span id="total-costs" class="value">₹0</span>
+                </div>
+
+                <div class="cost-metric">
+                    <span class="label">Trades Erased by Costs:</span>
+                    <span id="trades-erased" class="value">0</span>
+                    <span class="subtext">profitable → loss</span>
+                </div>
+            </div>
+
+            <div class="cost-verdict">
+                <h3>Cost-Adjusted Profit Factor Status</h3>
+                <div class="verdict-bar">
+                    <div class="verdict-zone zone-fail">
+                        <div class="zone-label">&lt; 1.0 FAIL</div>
+                    </div>
+                    <div class="verdict-zone zone-marginal">
+                        <div class="zone-label">1.0-1.2 MARGINAL</div>
+                    </div>
+                    <div class="verdict-zone zone-pass">
+                        <div class="zone-label">&gt; 1.2 PASS</div>
+                    </div>
+                    <div id="pf-indicator" class="pf-indicator" style="left: 50%"></div>
+                </div>
+                <div id="verdict-message" class="verdict-message">
+                    Collecting data... Need 30+ trades for reliable assessment
+                </div>
+            </div>
+        </section>
+
+        <!-- Trade Log Table -->
+        <section class="panel trades-panel">
+            <h2>📋 Trade Log</h2>
+            
+            <div class="table-controls">
+                <div class="filter-group">
+                    <label>Filter by Outcome:</label>
+                    <select id="outcome-filter">
+                        <option value="all">All Trades</option>
+                        <option value="WIN">Wins Only</option>
+                        <option value="LOSS">Losses Only</option>
+                    </select>
+                </div>
+                
+                <div class="filter-group">
+                    <label>Exit Reason:</label>
+                    <select id="exit-filter">
+                        <option value="all">All Reasons</option>
+                        <option value="STOP_LOSS">Stop Loss</option>
+                        <option value="TARGET">Target</option>
+                        <option value="HARD_EXIT">Hard Exit</option>
+                    </select>
+                </div>
+
+                <button id="export-csv-btn" class="export-btn">📥 Export to CSV</button>
+            </div>
+
+            <div class="table-wrapper">
+                <table id="trades-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Time</th>
+                            <th>Instrument</th>
+                            <th>Direction</th>
+                            <th>Entry</th>
+                            <th>Exit</th>
+                            <th>Exit Reason</th>
+                            <th>Duration</th>
+                            <th>Raw P&L</th>
+                            <th>Costs</th>
+                            <th>Adj P&L</th>
+                            <th>Outcome</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-tbody">
+                        <tr>
+                            <td colspan="12" class="no-data">No trades yet. Waiting for bot to start trading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- System Health -->
+        <section class="panel health-panel">
+            <h2>🔧 System Health</h2>
+            
+            <div class="health-grid">
+                <div class="health-item">
+                    <span class="label">WebSocket:</span>
+                    <span id="ws-status" class="status-unknown">Unknown</span>
+                </div>
+                <div class="health-item">
+                    <span class="label">Last Data Update:</span>
+                    <span id="data-timestamp" class="value">Never</span>
+                </div>
+                <div class="health-item">
+                    <span class="label">Candles Today:</span>
+                    <span id="candles-count" class="value">0</span>
+                </div>
+            </div>
+
+            <div class="logs-container">
+                <h3>Recent Errors/Warnings</h3>
+                <div id="error-log" class="error-log">
+                    <div class="log-entry">No errors or warnings</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>⚠️ Read-Only Dashboard - Does not control or modify bot behavior</p>
+            <p>Auto-refreshes every 5 seconds | Phase 2 Validation Mode</p>
+        </footer>
+    </div>
+
+    <!-- Kill Switch Confirmation Modal -->
+    <div id="kill-switch-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>⚠️ Confirm Kill Switch Activation</h2>
+            <p>This will:</p>
+            <ul>
+                <li>Close all open positions immediately</li>
+                <li>Stop the trading bot</li>
+                <li>Prevent new trades until manually restarted</li>
+            </ul>
+            <p><strong>Are you sure you want to activate the kill switch?</strong></p>
+            <div class="modal-buttons">
+                <button id="confirm-kill-switch" class="btn-danger">YES - ACTIVATE KILL SWITCH</button>
+                <button id="cancel-kill-switch" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,12 +1,22 @@
 import WebSocket from 'ws';
+import axios from 'axios';
+import protobuf from 'protobufjs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { EventEmitter } from 'events';
 import { logger } from '../utils/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Upstox WebSocket Client for Real-Time Market Data
  * 
- * Connects to Upstox WebSocket API and streams live tick data
- * Handles connection lifecycle, reconnection, and data parsing
+ * Uses official Upstox protobuf schema for V3 WebSocket API
+ * Properly decodes binary market data messages
+ * 
+ * IMPORTANT: Upstox V3 sends data in Google Protocol Buffers format
+ * This requires the official .proto schema file to decode messages correctly
  */
 export class UpstoxWebSocketClient extends EventEmitter {
   constructor(accessToken, config = {}) {
@@ -14,10 +24,11 @@ export class UpstoxWebSocketClient extends EventEmitter {
     
     this.accessToken = accessToken;
     this.config = {
-      url: config.url || 'wss://api-v2.upstox.com/feed/market-data-feed/v2',
+      authorizeUrl: config.authorizeUrl || 'https://api.upstox.com/v3/feed/market-data-feed/authorize',
       reconnectDelay: config.reconnectDelay || 5000,
       maxReconnectAttempts: config.maxReconnectAttempts || 10,
       heartbeatInterval: config.heartbeatInterval || 30000,
+      useMock: config.useMock || false, // Use mock data for testing
       ...config
     };
     
@@ -29,40 +40,137 @@ export class UpstoxWebSocketClient extends EventEmitter {
     this.reconnectTimer = null;
     this.tickBuffer = [];
     this.isIntentionalClose = false;
+    this.mockTickInterval = null;
+    this.authorizedWebSocketUrl = null; // Signed URL from authorize endpoint
+    this.protobufRoot = null; // Protobuf schema root
+    this.tickCount = 0; // Track number of ticks received
+    this.mockBasePrice = 24500; // Default base price, will be updated with real price
+    this.mockSessionOpen = null; // Track session open for OHLC
+    this.mockSessionHigh = null; // Track session high
+    this.mockSessionLow = null; // Track session low
   }
 
   /**
-   * Connect to Upstox WebSocket
+   * Initialize protobuf schema
+   * Must be called before connect()
+   */
+  async initProtobuf() {
+    try {
+      // Load the protobuf schema from SDK
+      const protoPath = path.resolve(
+        __dirname,
+        '../../node_modules/upstox-js-sdk/dist/feeder/proto/MarketDataFeedV3.proto'
+      );
+      
+      logger.info('Loading protobuf schema', { path: protoPath });
+      
+      this.protobufRoot = await protobuf.load(protoPath);
+      
+      logger.info('✅ Protobuf schema loaded successfully');
+      
+    } catch (error) {
+      logger.error('Failed to load protobuf schema', {
+        error: error.message,
+        stack: error.stack
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Step 1: Call authorize endpoint to get signed WebSocket URL
+   * 
+   * This must be called BEFORE attempting WebSocket connection
+   * The returned URL is single-use and short-lived
+   */
+  async authorizeWebSocket() {
+    try {
+      logger.info('Calling WebSocket authorize endpoint', {
+        url: this.config.authorizeUrl
+      });
+
+      const response = await axios.get(this.config.authorizeUrl, {
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${this.accessToken}`
+        }
+      });
+
+      if (response.data && response.data.data && response.data.data.authorized_redirect_uri) {
+        this.authorizedWebSocketUrl = response.data.data.authorized_redirect_uri;
+        
+        logger.info('WebSocket authorization successful', {
+          url: this.authorizedWebSocketUrl.substring(0, 50) + '...' // Log first 50 chars only
+        });
+        
+        return this.authorizedWebSocketUrl;
+      } else {
+        throw new Error('Invalid authorize response - missing authorized_redirect_uri');
+      }
+
+    } catch (error) {
+      logger.error('WebSocket authorization failed', {
+        error: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        errorDetails: JSON.stringify(error.response?.data?.errors || [])
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Step 2: Connect to Upstox WebSocket using authorized URL
+   * 
+   * IMPORTANT: Must call initProtobuf() and authorizeWebSocket() first
+   * Do NOT reuse URLs - each connection requires a fresh authorize call
    */
   async connect() {
-    return new Promise((resolve, reject) => {
+    // Use mock mode if enabled
+    if (this.config.useMock) {
+      return this.connectMock();
+    }
+
+    return new Promise(async (resolve, reject) => {
       try {
-        const wsUrl = `${this.config.url}?access_token=${this.accessToken}`;
+        // Step 0: Initialize protobuf if not already done
+        if (!this.protobufRoot) {
+          await this.initProtobuf();
+        }
+
+        // Step 1: Get authorized WebSocket URL
+        const authorizedUrl = await this.authorizeWebSocket();
         
-        logger.info('Connecting to Upstox WebSocket', { url: this.config.url });
+        logger.info('Connecting to authorized WebSocket URL');
         
-        this.ws = new WebSocket(wsUrl, {
-          headers: {
-            'Api-Version': '2.0',
-            'Authorization': `Bearer ${this.accessToken}`
-          }
+        // Step 2: Connect to the signed URL (do NOT add token - already signed)
+        this.ws = new WebSocket(authorizedUrl, {
+          followRedirects: true
         });
 
         this.ws.on('open', () => {
           this.isConnected = true;
           this.reconnectAttempts = 0;
-          logger.info('WebSocket connected successfully');
+          logger.info('✅ WebSocket connected successfully');
           
           // Start heartbeat
           this.startHeartbeat();
           
-          // Resubscribe if this is a reconnection
-          if (this.subscriptions.size > 0) {
-            this.resubscribe();
-          }
-          
-          this.emit('connected');
-          resolve();
+          // CRITICAL: Wait 1 second before allowing subscriptions
+          // The Upstox server needs time to initialize the connection
+          // before it can process subscription messages (per official SDK example)
+          setTimeout(() => {
+            logger.info('WebSocket ready to accept subscriptions');
+            
+            // Resubscribe if this is a reconnection
+            if (this.subscriptions.size > 0) {
+              this.resubscribe();
+            }
+            
+            this.emit('connected');
+            resolve();
+          }, 1000);
         });
 
         this.ws.on('message', (data) => {
@@ -78,10 +186,14 @@ export class UpstoxWebSocketClient extends EventEmitter {
           this.isConnected = false;
           this.stopHeartbeat();
           
+          // Clear the authorized URL - it's single-use
+          this.authorizedWebSocketUrl = null;
+          
           logger.warn('WebSocket closed', { 
             code, 
             reason: reason.toString(),
-            intentional: this.isIntentionalClose
+            intentional: this.isIntentionalClose,
+            ticksReceived: this.tickCount
           });
           
           this.emit('disconnected', { code, reason });
@@ -100,9 +212,29 @@ export class UpstoxWebSocketClient extends EventEmitter {
         }, 10000);
 
       } catch (error) {
-        logger.error('Failed to create WebSocket connection', { error: error.message });
+        logger.error('Failed to connect to WebSocket', { 
+          error: error.message,
+          stack: error.stack
+        });
         reject(error);
       }
+    });
+  }
+
+  /**
+   * Connect in mock mode (for testing without real WebSocket)
+   */
+  async connectMock() {
+    logger.warn('⚠️  Using MOCK WebSocket mode - simulated market data for testing');
+    
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        this.isConnected = true;
+        this.mockBasePrice = 22000; // Starting NIFTY price
+        logger.info('Mock WebSocket connected successfully');
+        this.emit('connected');
+        resolve();
+      }, 100);
     });
   }
 
@@ -111,69 +243,248 @@ export class UpstoxWebSocketClient extends EventEmitter {
    */
   handleMessage(data) {
     try {
-      // Parse binary or JSON message
-      let message;
+      // All V3 WebSocket messages are binary protobuf format
+      if (!Buffer.isBuffer(data)) {
+        logger.warn('Received non-buffer data - unexpected', {
+          type: typeof data
+        });
+        return;
+      }
       
-      if (Buffer.isBuffer(data)) {
-        // Binary data - parse according to Upstox protocol
-        message = this.parseBinaryMessage(data);
-      } else {
-        // JSON data
-        message = JSON.parse(data.toString());
+      // Decode using official protobuf schema
+      const decoded = this.decodeProtobuf(data);
+      
+      if (!decoded) {
+        logger.warn('Failed to decode protobuf message');
+        return;
       }
 
-      // Emit different events based on message type
-      if (message.type === 'tick') {
-        this.emit('tick', message.data);
+      // Log first few ticks with full details for verification
+      if (this.tickCount < 5) {
+        logger.info(`✅ VERIFIED TICK #${this.tickCount + 1}`, {
+          decoded: JSON.stringify(decoded, null, 2)
+        });
+      } else if (this.tickCount === 5) {
+        logger.info('First 5 ticks logged - switching to standard logging');
+      }
+
+      this.tickCount++;
+
+      // Process based on message type
+      // Upstox protobuf has a 'feeds' field with market data
+      if (decoded.feeds && Object.keys(decoded.feeds).length > 0) {
+        logger.info('🟢 LIVE_FEED MESSAGE RECEIVED', {
+          feedCount: Object.keys(decoded.feeds).length,
+          instruments: Object.keys(decoded.feeds),
+          type: decoded.type
+        });
         
-        // Buffer ticks for potential replay during reconnection
-        this.tickBuffer.push(message.data);
-        if (this.tickBuffer.length > 1000) {
-          this.tickBuffer.shift(); // Keep only last 1000 ticks
+        for (const [instrumentKey, feedData] of Object.entries(decoded.feeds)) {
+          // Convert protobuf feed data to our tick format
+          const tick = this.convertFeedToTick(instrumentKey, feedData);
+          
+          // Log first few ticks with full details
+          if (this.tickCount < 5) {
+            logger.info(`🟢 WEBSOCKET TICK #${this.tickCount + 1} PARSED`, {
+              instrumentKey,
+              ltp: tick.ltp,
+              open: tick.open,
+              high: tick.high,
+              low: tick.low,
+              volume: tick.volume,
+              timestamp: tick.timestamp
+            });
+          }
+          
+          // Log every 10th tick for monitoring
+          if (this.tickCount % 10 === 0 && this.tickCount > 0) {
+            logger.debug('Tick data', {
+              count: this.tickCount,
+              instrumentKey,
+              ltp: tick.ltp,
+              volume: tick.volume
+            });
+          }
+          
+          this.emit('tick', tick);
+          
+          // Buffer ticks for potential replay during reconnection
+          this.tickBuffer.push(tick);
+          if (this.tickBuffer.length > 1000) {
+            this.tickBuffer.shift(); // Keep only last 1000 ticks
+          }
         }
-      } else if (message.type === 'acknowledgement') {
-        this.emit('acknowledgement', message.data);
-        logger.info('Subscription acknowledged', message.data);
-      } else if (message.type === 'error') {
-        this.emit('message_error', message.data);
-        logger.error('WebSocket message error', message.data);
       } else {
-        // Unknown message type
-        this.emit('message', message);
+        // Other message types (acknowledgements, errors, market info)
+        if (decoded.type === 'market_info') {
+          logger.debug('Market info received', {
+            segmentStatus: decoded.marketInfo?.segmentStatus
+          });
+        } else {
+          logger.debug('Non-feed message received', {
+            type: decoded.type,
+            hasFeeds: !!decoded.feeds,
+            feedCount: decoded.feeds ? Object.keys(decoded.feeds).length : 0,
+            keys: Object.keys(decoded)
+          });
+        }
+        this.emit('message', decoded);
       }
 
     } catch (error) {
-      logger.error('Failed to handle WebSocket message', { error: error.message });
+      logger.error('Failed to handle WebSocket message', { 
+        error: error.message,
+        stack: error.stack
+      });
       this.emit('parse_error', error);
     }
   }
 
   /**
+   * Decode binary protobuf message using official Upstox schema
+   */
+  decodeProtobuf(buffer) {
+    try {
+      if (!this.protobufRoot) {
+        logger.error('Protobuf schema not initialized - cannot decode');
+        return null;
+      }
+
+      // Look up the FeedResponse message type
+      const FeedResponse = this.protobufRoot.lookupType(
+        'com.upstox.marketdatafeederv3udapi.rpc.proto.FeedResponse'
+      );
+      
+      // Decode the buffer
+      const message = FeedResponse.decode(buffer);
+      
+      // Convert to plain object
+      const object = FeedResponse.toObject(message, {
+        longs: Number, // Convert Long to Number
+        enums: String, // Convert enums to strings
+        bytes: String, // Convert bytes to strings
+        defaults: true, // Include default values
+        arrays: true, // Populate arrays
+        objects: true, // Populate objects
+        oneofs: true // Set virtual oneof properties
+      });
+      
+      return object;
+
+    } catch (error) {
+      logger.error('Protobuf decode failed', {
+        error: error.message,
+        stack: error.stack,
+        bufferLength: buffer.length
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Convert protobuf feed data to our standard tick format
+   */
+  convertFeedToTick(instrumentKey, feedData) {
+    // feedData structure based on proto schema:
+    // Feed { ltpc | fullFeed | firstLevelWithGreeks, requestMode }
+    
+    // Extract the feed union (one of: ltpc, fullFeed, firstLevelWithGreeks)
+    let ltpc = null;
+    let ohlc = null;
+    let marketLevel = null;
+    let oi = 0;
+    let volume = 0;
+    
+    // Check which feed type we received
+    if (feedData.ltpc) {
+      // Simple LTPC feed
+      ltpc = feedData.ltpc;
+    } else if (feedData.fullFeed) {
+      // Full feed (either marketFF or indexFF)
+      if (feedData.fullFeed.indexFF) {
+        // Index Full Feed
+        ltpc = feedData.fullFeed.indexFF.ltpc;
+        if (feedData.fullFeed.indexFF.marketOHLC && feedData.fullFeed.indexFF.marketOHLC.ohlc && feedData.fullFeed.indexFF.marketOHLC.ohlc.length > 0) {
+          ohlc = feedData.fullFeed.indexFF.marketOHLC.ohlc[0]; // Get first OHLC
+        }
+      } else if (feedData.fullFeed.marketFF) {
+        // Market Full Feed (options, stocks)
+        ltpc = feedData.fullFeed.marketFF.ltpc;
+        marketLevel = feedData.fullFeed.marketFF.marketLevel;
+        oi = feedData.fullFeed.marketFF.oi || 0;
+        volume = feedData.fullFeed.marketFF.vtt || 0;
+        if (feedData.fullFeed.marketFF.marketOHLC && feedData.fullFeed.marketFF.marketOHLC.ohlc && feedData.fullFeed.marketFF.marketOHLC.ohlc.length > 0) {
+          ohlc = feedData.fullFeed.marketFF.marketOHLC.ohlc[0];
+        }
+      }
+    } else if (feedData.firstLevelWithGreeks) {
+      // First level with Greeks (options)
+      ltpc = feedData.firstLevelWithGreeks.ltpc;
+      oi = feedData.firstLevelWithGreeks.oi || 0;
+      volume = feedData.firstLevelWithGreeks.vtt || 0;
+    }
+    
+    // Extract bid/ask from market level
+    let bid = 0;
+    let ask = 0;
+    let bidQty = 0;
+    let askQty = 0;
+    
+    if (marketLevel && marketLevel.bidAskQuote && marketLevel.bidAskQuote.length > 0) {
+      const firstLevel = marketLevel.bidAskQuote[0];
+      bid = firstLevel.bidP || 0;
+      ask = firstLevel.askP || 0;
+      bidQty = firstLevel.bidQ || 0;
+      askQty = firstLevel.askQ || 0;
+    }
+    
+    // Build tick object
+    const currentLtp = ltpc?.ltp || ltpc?.cp || 0;
+    
+    return {
+      instrumentKey,
+      timestamp: new Date().toISOString(),
+      
+      // Last traded price data
+      ltp: currentLtp,
+      ltq: ltpc?.ltq || 0,
+      ltt: ltpc?.ltt || null,
+      
+      // Volume
+      volume,
+      
+      // OHLC (from protobuf OHLC if available)
+      open: ohlc?.open || currentLtp,
+      high: ohlc?.high || currentLtp,
+      low: ohlc?.low || currentLtp,
+      close: ohlc?.close || currentLtp,
+      
+      // Bid/Ask
+      bid: bid || currentLtp * 0.999,
+      ask: ask || currentLtp * 1.001,
+      bidQty,
+      askQty,
+      
+      // Open Interest
+      oi,
+      oiDayHigh: 0, // Not available in V3
+      oiDayLow: 0,  // Not available in V3
+      
+      // Raw protobuf data for debugging
+      _raw: feedData
+    };
+  }
+
+  /**
    * Parse binary message from Upstox
    * Format: https://upstox.com/developer/api-documentation/websocket
+   * 
+   * @deprecated - Use decodeProtobuf() instead
    */
   parseBinaryMessage(buffer) {
-    try {
-      // Upstox sends protobuf binary data
-      // For now, convert to JSON format
-      // In production, use proper protobuf parser
-      
-      // Simplified parsing - replace with actual Upstox protocol
-      const tick = {
-        type: 'tick',
-        data: {
-          instrument_key: buffer.slice(0, 20).toString('utf8').trim(),
-          ltp: buffer.readDoubleBE(20),
-          volume: buffer.readUInt32BE(28),
-          timestamp: new Date().toISOString()
-        }
-      };
-      
-      return tick;
-    } catch (error) {
-      logger.error('Failed to parse binary message', { error: error.message });
-      return { type: 'error', data: { message: 'Parse error' } };
-    }
+    // This method is deprecated - protobuf decoding happens in decodeProtobuf()
+    logger.warn('parseBinaryMessage() is deprecated - use decodeProtobuf()');
+    return this.decodeProtobuf(buffer);
   }
 
   /**
@@ -189,6 +500,11 @@ export class UpstoxWebSocketClient extends EventEmitter {
       return false;
     }
 
+    // Mock mode
+    if (this.config.useMock) {
+      return this.subscribeMock(instrumentKeys);
+    }
+
     const subscribeMessage = {
       guid: this.generateGuid(),
       method: 'sub',
@@ -199,17 +515,133 @@ export class UpstoxWebSocketClient extends EventEmitter {
     };
 
     try {
-      this.ws.send(JSON.stringify(subscribeMessage));
+      // Log exact payload being sent
+      logger.info('📤 SENDING SUBSCRIPTION MESSAGE', {
+        payload: subscribeMessage,
+        payloadString: JSON.stringify(subscribeMessage)
+      });
+      
+      // Send as Buffer (matching SDK example)
+      this.ws.send(Buffer.from(JSON.stringify(subscribeMessage)));
       
       // Track subscriptions
       instrumentKeys.forEach(key => this.subscriptions.add(key));
       
-      logger.info('Subscribed to instruments', { instrumentKeys });
+      logger.info('✅ Subscription message sent', { instrumentKeys });
       return true;
     } catch (error) {
       logger.error('Failed to subscribe', { error: error.message });
       return false;
     }
+  }
+
+  /**
+   * Subscribe in mock mode
+   */
+  async subscribeMock(instrumentKeys) {
+    // Track subscriptions
+    instrumentKeys.forEach(key => this.subscriptions.add(key));
+    
+    logger.info('Mock subscribed to instruments', { instrumentKeys });
+    
+    // Fetch real market price before starting mock ticks
+    if (!this.mockTickInterval) {
+      await this.fetchRealBasePriceForMock();
+      this.startMockTicks();
+    }
+    
+    return true;
+  }
+
+  /**
+   * Fetch real NIFTY price to use as base for mock data
+   */
+  async fetchRealBasePriceForMock() {
+    try {
+      logger.info('Fetching real NIFTY price for mock base...');
+      
+      const response = await axios.get('https://api.upstox.com/v2/market-quote/quotes', {
+        params: {
+          instrument_key: 'NSE_INDEX|Nifty 50'
+        },
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Accept': 'application/json'
+        },
+        timeout: 5000
+      });
+
+      if (response.data && response.data.status === 'success') {
+        const data = response.data.data['NSE_INDEX:Nifty 50'];
+        const realPrice = data?.last_price || data?.ltp || data?.ohlc?.close || 24500;
+        
+        this.mockBasePrice = realPrice;
+        this.mockSessionOpen = realPrice; // Set session open
+        this.mockSessionHigh = realPrice; // Initialize high
+        this.mockSessionLow = realPrice; // Initialize low
+        
+        logger.info('✅ Mock base price synced with real market', {
+          realPrice: this.mockBasePrice,
+          source: 'Upstox API'
+        });
+      } else {
+        logger.warn('Could not fetch real price, using default', {
+          default: this.mockBasePrice
+        });
+      }
+    } catch (error) {
+      logger.warn('Failed to fetch real NIFTY price for mock, using default', {
+        error: error.message,
+        default: this.mockBasePrice
+      });
+    }
+  }
+
+  /**
+   * Generate mock market ticks
+   */
+  startMockTicks() {
+    logger.info('Starting mock tick generation (1 tick per second)', {
+      basePrice: this.mockBasePrice
+    });
+    
+    this.mockTickInterval = setInterval(() => {
+      // Generate realistic price movement
+      const volatility = 0.0005; // 0.05% per tick
+      const drift = (Math.random() - 0.5) * 2 * volatility;
+      this.mockBasePrice = this.mockBasePrice * (1 + drift);
+      
+      // Track session high/low
+      if (!this.mockSessionHigh || this.mockBasePrice > this.mockSessionHigh) {
+        this.mockSessionHigh = this.mockBasePrice;
+      }
+      if (!this.mockSessionLow || this.mockBasePrice < this.mockSessionLow) {
+        this.mockSessionLow = this.mockBasePrice;
+      }
+      
+      // Generate tick for each subscribed instrument
+      for (const instrumentKey of this.subscriptions) {
+        const tick = {
+          instrumentKey,
+          timestamp: new Date().toISOString(),
+          ltp: Math.round(this.mockBasePrice * 100) / 100,
+          ltq: Math.floor(Math.random() * 100) + 1,
+          volume: Math.floor(Math.random() * 10000),
+          bid: Math.round((this.mockBasePrice * 0.999) * 100) / 100,
+          ask: Math.round((this.mockBasePrice * 1.001) * 100) / 100,
+          bidQty: Math.floor(Math.random() * 500),
+          askQty: Math.floor(Math.random() * 500),
+          open: this.mockSessionOpen || this.mockBasePrice,
+          high: this.mockSessionHigh || this.mockBasePrice,
+          low: this.mockSessionLow || this.mockBasePrice,
+          close: this.mockBasePrice,
+          oiDayHigh: 0,
+          oiDayLow: 0
+        };
+        
+        this.emit('tick', tick);
+      }
+    }, 1000); // 1 tick per second
   }
 
   /**
@@ -291,6 +723,9 @@ export class UpstoxWebSocketClient extends EventEmitter {
 
   /**
    * Attempt to reconnect
+   * 
+   * IMPORTANT: Each reconnection requires a fresh authorize call
+   * Do NOT reuse the previous authorized URL
    */
   attemptReconnect() {
     if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
@@ -304,13 +739,14 @@ export class UpstoxWebSocketClient extends EventEmitter {
     this.reconnectAttempts++;
     const delay = this.config.reconnectDelay * this.reconnectAttempts;
     
-    logger.info('Attempting to reconnect', {
+    logger.info('Attempting to reconnect (will call authorize endpoint again)', {
       attempt: this.reconnectAttempts,
       maxAttempts: this.config.maxReconnectAttempts,
       delayMs: delay
     });
 
     this.reconnectTimer = setTimeout(() => {
+      // Connect will automatically call authorizeWebSocket() again
       this.connect().catch(error => {
         logger.error('Reconnection failed', { error: error.message });
         this.attemptReconnect();

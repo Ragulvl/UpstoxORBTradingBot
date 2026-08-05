@@ -13,6 +13,7 @@
 - **New users**: Start with `README.md`
 - **Setup instructions**: See `QUICKSTART.md` or `SETUP.md`
 - **Phase 2 quick start**: See `PHASE2_QUICKSTART.md`
+- **Dashboard**: See `DASHBOARD_QUICKSTART.md` (monitoring interface)
 
 ### 📚 Documentation by Phase
 
@@ -34,6 +35,8 @@
 - `ARCHITECTURE.md` - System design
 - `CHECKLIST.md` - Implementation checklist
 - `DOCS.md` - Documentation index
+- `DASHBOARD.md` - Monitoring dashboard (complete guide)
+- `DASHBOARD_QUICKSTART.md` - Dashboard setup (quick start)
 
 ---
 

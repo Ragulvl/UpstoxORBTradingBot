@@ -87,4 +87,8 @@ class Logger {
   }
 }
 
+// Create and export a default logger instance
+const logger = new Logger({ level: 'info', directory: './logs' });
+
+export { logger };
 export default Logger;
