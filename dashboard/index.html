@@ -1,378 +1,481 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚡ Upstox ORB Bot - Live Dashboard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ORB Trading Bot — Live Dashboard</title>
+  <meta name="description" content="Upstox Golden Ratio ORB Trading Bot — Phase 2 Sandbox Monitoring">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <h1>⚡ Upstox ORB Trading Bot</h1>
-            <p class="subtitle">Real-Time Monitoring Dashboard • Phase 2 Validation • Live Market Data</p>
-        </header>
 
-        <!-- Live Status Bar -->
-        <section class="status-bar">
-            <div class="status-item">
-                <span class="label">Bot Status:</span>
-                <span id="bot-status" class="value status-unknown">Unknown</span>
-            </div>
-            <div class="status-item">
-                <span class="label">Market Session:</span>
-                <span id="market-session" class="value">Loading...</span>
-            </div>
-            <div class="status-item">
-                <span class="label">Next Event:</span>
-                <span id="next-event" class="value">Loading...</span>
-            </div>
-            <div class="status-item">
-                <span class="label">Last Update:</span>
-                <span id="last-update" class="value">Never</span>
-            </div>
-        </section>
-
-        <!-- Real-Time Market View -->
-        <section class="panel market-view-panel">
-            <h2>📊 Real-Time Market View - NIFTY 50</h2>
-            
-            <div class="market-header">
-                <div class="spot-price-display">
-                    <div class="spot-label">Current Spot Price</div>
-                    <div id="spot-price" class="spot-price">--,---</div>
-                    <div id="spot-change" class="spot-change">---</div>
-                </div>
-                
-                <div class="data-source-indicator">
-                    <div id="data-source" class="data-source">
-                        <span class="indicator-dot" id="ws-indicator"></span>
-                        <span id="source-text">Connecting...</span>
-                    </div>
-                    <div class="last-tick">Last tick: <span id="last-tick-time">--:--:--</span></div>
-                </div>
-            </div>
-
-            <div class="chart-container-large">
-                <canvas id="price-chart"></canvas>
-            </div>
-
-            <div class="opening-range-display" id="or-display" style="display: none;">
-                <h3>Opening Range (9:15-9:30 AM)</h3>
-                <div class="or-grid">
-                    <div class="or-item">
-                        <span class="label">High:</span>
-                        <span id="or-high" class="value">---</span>
-                    </div>
-                    <div class="or-item">
-                        <span class="label">Low:</span>
-                        <span id="or-low" class="value">---</span>
-                    </div>
-                    <div class="or-item">
-                        <span class="label">Range:</span>
-                        <span id="or-range" class="value">---</span>
-                    </div>
-                </div>
-                
-                <h3>Golden Ratio Breakout Levels</h3>
-                <div class="gr-grid">
-                    <div class="gr-item long">
-                        <span class="label">📈 CALL Entry:</span>
-                        <span id="gr-long" class="value">---</span>
-                    </div>
-                    <div class="gr-item short">
-                        <span class="label">📉 PUT Entry:</span>
-                        <span id="gr-short" class="value">---</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Current Position -->
-        <section class="panel position-panel" id="position-panel" style="display: none;">
-            <h2>📊 Current Position</h2>
-            <div class="position-grid">
-                <div class="position-item">
-                    <span class="label">Instrument:</span>
-                    <span id="pos-instrument" class="value">-</span>
-                </div>
-                <div class="position-item">
-                    <span class="label">Direction:</span>
-                    <span id="pos-direction" class="value">-</span>
-                </div>
-                <div class="position-item">
-                    <span class="label">Entry Price:</span>
-                    <span id="pos-entry" class="value">-</span>
-                </div>
-                <div class="position-item">
-                    <span class="label">Current Price:</span>
-                    <span id="pos-current" class="value">-</span>
-                </div>
-                <div class="position-item">
-                    <span class="label">P&L:</span>
-                    <span id="pos-pnl" class="value">-</span>
-                </div>
-                <div class="position-item">
-                    <span class="label">Time Held:</span>
-                    <span id="pos-duration" class="value">-</span>
-                </div>
-            </div>
-        </section>
-
-        <!-- Risk & Safety Panel -->
-        <section class="panel risk-panel">
-            <h2>🛡️ Risk & Safety</h2>
-            
-            <div class="risk-item">
-                <div class="risk-header">
-                    <span class="label">Daily Loss Limit</span>
-                    <span id="daily-loss-value" class="value">₹0 / ₹2,000 (0.0%)</span>
-                </div>
-                <div class="progress-bar">
-                    <div id="daily-loss-progress" class="progress-fill" style="width: 0%"></div>
-                </div>
-            </div>
-
-            <div class="risk-item">
-                <div class="risk-header">
-                    <span class="label">Trades Today</span>
-                    <span id="trades-count-value" class="value">0 / 2</span>
-                </div>
-                <div class="progress-bar">
-                    <div id="trades-count-progress" class="progress-fill" style="width: 0%"></div>
-                </div>
-            </div>
-
-            <div class="risk-item">
-                <span class="label">Circuit Breaker:</span>
-                <span id="circuit-breaker" class="status-ok">ARMED</span>
-            </div>
-
-            <div class="kill-switch-container">
-                <button id="kill-switch-btn" class="kill-switch-btn">
-                    🛑 KILL SWITCH
-                </button>
-                <p class="kill-switch-info">Emergency stop - closes positions and stops bot</p>
-            </div>
-        </section>
-
-        <!-- Performance Summary -->
-        <section class="panel performance-panel">
-            <h2>📈 Performance Summary</h2>
-            
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <h3>Total Trades</h3>
-                    <div class="metric-value" id="total-trades">0</div>
-                    <div class="metric-subtext">
-                        <span id="total-wins">0</span> wins / <span id="total-losses">0</span> losses
-                    </div>
-                </div>
-
-                <div class="metric-card">
-                    <h3>Win Rate</h3>
-                    <div class="metric-comparison">
-                        <div>
-                            <div class="metric-label">Raw</div>
-                            <div class="metric-value" id="win-rate-raw">0%</div>
-                        </div>
-                        <div>
-                            <div class="metric-label">Cost-Adj</div>
-                            <div class="metric-value" id="win-rate-adjusted">0%</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="metric-card">
-                    <h3>Profit Factor</h3>
-                    <div class="metric-comparison">
-                        <div>
-                            <div class="metric-label">Raw</div>
-                            <div class="metric-value" id="profit-factor-raw">0.00</div>
-                        </div>
-                        <div>
-                            <div class="metric-label">Cost-Adj</div>
-                            <div class="metric-value" id="profit-factor-adjusted">0.00</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="metric-card">
-                    <h3>Total P&L</h3>
-                    <div class="metric-comparison">
-                        <div>
-                            <div class="metric-label">Raw</div>
-                            <div class="metric-value" id="pnl-raw">₹0</div>
-                        </div>
-                        <div>
-                            <div class="metric-label">Cost-Adj</div>
-                            <div class="metric-value" id="pnl-adjusted">₹0</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="chart-container">
-                <h3>Equity Curve</h3>
-                <canvas id="equity-chart"></canvas>
-            </div>
-        </section>
-
-        <!-- Cost Analysis Panel -->
-        <section class="panel cost-panel">
-            <h2>💰 Cost Analysis - Phase 2 Key Metric</h2>
-            
-            <div class="cost-metrics">
-                <div class="cost-metric">
-                    <span class="label">Avg Cost per Trade:</span>
-                    <span id="avg-cost-percent" class="value">0%</span>
-                    <span class="subtext">of raw P&L</span>
-                </div>
-                
-                <div class="cost-metric">
-                    <span class="label">Total Costs:</span>
-                    <span id="total-costs" class="value">₹0</span>
-                </div>
-
-                <div class="cost-metric">
-                    <span class="label">Trades Erased by Costs:</span>
-                    <span id="trades-erased" class="value">0</span>
-                    <span class="subtext">profitable → loss</span>
-                </div>
-            </div>
-
-            <div class="cost-verdict">
-                <h3>Cost-Adjusted Profit Factor Status</h3>
-                <div class="verdict-bar">
-                    <div class="verdict-zone zone-fail">
-                        <div class="zone-label">&lt; 1.0 FAIL</div>
-                    </div>
-                    <div class="verdict-zone zone-marginal">
-                        <div class="zone-label">1.0-1.2 MARGINAL</div>
-                    </div>
-                    <div class="verdict-zone zone-pass">
-                        <div class="zone-label">&gt; 1.2 PASS</div>
-                    </div>
-                    <div id="pf-indicator" class="pf-indicator" style="left: 50%"></div>
-                </div>
-                <div id="verdict-message" class="verdict-message">
-                    Collecting data... Need 30+ trades for reliable assessment
-                </div>
-            </div>
-        </section>
-
-        <!-- Trade Log Table -->
-        <section class="panel trades-panel">
-            <h2>📋 Trade Log</h2>
-            
-            <div class="table-controls">
-                <div class="filter-group">
-                    <label>Filter by Outcome:</label>
-                    <select id="outcome-filter">
-                        <option value="all">All Trades</option>
-                        <option value="WIN">Wins Only</option>
-                        <option value="LOSS">Losses Only</option>
-                    </select>
-                </div>
-                
-                <div class="filter-group">
-                    <label>Exit Reason:</label>
-                    <select id="exit-filter">
-                        <option value="all">All Reasons</option>
-                        <option value="STOP_LOSS">Stop Loss</option>
-                        <option value="TARGET">Target</option>
-                        <option value="HARD_EXIT">Hard Exit</option>
-                    </select>
-                </div>
-
-                <button id="export-csv-btn" class="export-btn">📥 Export to CSV</button>
-            </div>
-
-            <div class="table-wrapper">
-                <table id="trades-table">
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Time</th>
-                            <th>Instrument</th>
-                            <th>Direction</th>
-                            <th>Entry</th>
-                            <th>Exit</th>
-                            <th>Exit Reason</th>
-                            <th>Duration</th>
-                            <th>Raw P&L</th>
-                            <th>Costs</th>
-                            <th>Adj P&L</th>
-                            <th>Outcome</th>
-                        </tr>
-                    </thead>
-                    <tbody id="trades-tbody">
-                        <tr>
-                            <td colspan="12" class="no-data">No trades yet. Waiting for bot to start trading...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- System Health -->
-        <section class="panel health-panel">
-            <h2>🔧 System Health</h2>
-            
-            <div class="health-grid">
-                <div class="health-item">
-                    <span class="label">WebSocket:</span>
-                    <span id="ws-status" class="status-unknown">Unknown</span>
-                </div>
-                <div class="health-item">
-                    <span class="label">Last Data Update:</span>
-                    <span id="data-timestamp" class="value">Never</span>
-                </div>
-                <div class="health-item">
-                    <span class="label">Candles Today:</span>
-                    <span id="candles-count" class="value">0</span>
-                </div>
-            </div>
-
-            <div class="logs-container">
-                <h3>Recent Errors/Warnings</h3>
-                <div id="error-log" class="error-log">
-                    <div class="log-entry">No errors or warnings</div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Footer -->
-        <footer class="footer">
-            <p>⚠️ Read-Only Dashboard - Does not control or modify bot behavior</p>
-            <p>Auto-refreshes every 5 seconds | Phase 2 Validation Mode</p>
-        </footer>
+<!-- TOP BAR -->
+<header class="topbar" role="banner">
+  <div class="topbar-brand">
+    <div class="brand-glyph" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <path d="M9 1.5L2 6v10.5h5V12h4v4.5h5V6Z" fill="currentColor"/>
+      </svg>
     </div>
+    <span class="brand-name">ORB Bot</span>
+    <span class="brand-badge">PHASE 2</span>
+  </div>
+  <div class="topbar-market">
+    <div class="market-block">
+      <span class="market-label">NIFTY 50</span>
+      <span id="spot-price" class="market-price">--,---</span>
+      <span id="spot-change" class="market-change">---</span>
+    </div>
+    <div class="market-meta">
+      <span class="conn-dot" id="ws-indicator"></span>
+      <span class="conn-label" id="source-text">Connecting...</span>
+      <span class="tick-sep">·</span>
+      <span class="tick-label">tick <span id="last-tick-time" class="mono">--:--</span></span>
+    </div>
+  </div>
+  <div class="topbar-controls">
+    <div class="topbar-pill">
+      <span class="pill-label">Session</span>
+      <span class="pill-value" id="market-session">—</span>
+    </div>
+    <div class="topbar-pill">
+      <span class="pill-label">Next</span>
+      <span class="pill-value" id="next-event">—</span>
+    </div>
+    <div class="topbar-pill">
+      <span class="pill-label">Updated</span>
+      <span class="pill-value" id="last-update">Never</span>
+    </div>
+    <div class="status-chip" id="status-chip">
+      <span class="chip-dot" id="bot-pulse-dot"></span>
+      <span class="chip-label" id="bot-status">Unknown</span>
+    </div>
+    <div class="topbar-clock mono" id="topbar-clock" aria-live="polite">--:--:-- IST</div>
+  </div>
+</header>
 
-    <!-- Kill Switch Confirmation Modal -->
-    <div id="kill-switch-modal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <h2>⚠️ Confirm Kill Switch Activation</h2>
-            <p>This will:</p>
-            <ul>
-                <li>Close all open positions immediately</li>
-                <li>Stop the trading bot</li>
-                <li>Prevent new trades until manually restarted</li>
-            </ul>
-            <p><strong>Are you sure you want to activate the kill switch?</strong></p>
-            <div class="modal-buttons">
-                <button id="confirm-kill-switch" class="btn-danger">YES - ACTIVATE KILL SWITCH</button>
-                <button id="cancel-kill-switch" class="btn-secondary">Cancel</button>
-            </div>
+<!-- SIDEBAR -->
+<aside class="sidebar" role="navigation" aria-label="Dashboard sections">
+  <nav class="sidebar-nav">
+    <a class="nav-item active" href="#sec-market" id="nav-market" title="Overview">
+      <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="2" width="7" height="7" rx="1.5"/>
+        <rect x="11" y="2" width="7" height="7" rx="1.5"/>
+        <rect x="2" y="11" width="7" height="7" rx="1.5"/>
+        <rect x="11" y="11" width="7" height="7" rx="1.5"/>
+      </svg>
+      <span class="nav-label">Overview</span>
+    </a>
+    <a class="nav-item" href="#sec-position" id="nav-position" title="Position">
+      <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="2,14 6,9 10,11 15,5 18,7"/>
+        <circle cx="18" cy="7" r="1.5" fill="currentColor" stroke="none"/>
+      </svg>
+      <span class="nav-label">Position</span>
+    </a>
+    <a class="nav-item" href="#sec-risk" id="nav-risk" title="Risk">
+      <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 2L3 6v5.5C3 15 6.5 18 10 19c3.5-1 7-4 7-7.5V6Z"/>
+      </svg>
+      <span class="nav-label">Risk</span>
+    </a>
+    <a class="nav-item" href="#sec-performance" id="nav-performance" title="Performance">
+      <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="2,16 6,10 10,13 15,6"/>
+        <line x1="2" y1="19" x2="18" y2="19"/>
+        <polyline points="14,6 18,6 18,10"/>
+      </svg>
+      <span class="nav-label">Performance</span>
+    </a>
+    <a class="nav-item" href="#sec-trades" id="nav-trades" title="Trade Journal">
+      <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="14" height="14" rx="1.5"/>
+        <line x1="3" y1="8" x2="17" y2="8"/>
+        <line x1="8" y1="8" x2="8" y2="17"/>
+      </svg>
+      <span class="nav-label">Trades</span>
+    </a>
+    <a class="nav-item" href="#sec-health" id="nav-health" title="System Health">
+      <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 10h3l2-5 3 10 3-7 2 2h3"/>
+      </svg>
+      <span class="nav-label">Health</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer-label">SANDBOX</div>
+</aside>
+
+<!-- MAIN -->
+<main class="main" role="main">
+
+  <!-- SECTION: Market Overview -->
+  <section class="content-section" id="sec-market" aria-label="Market Overview">
+    <div class="section-head">
+      <h1 class="section-title">Live Market</h1>
+      <p class="section-sub">NIFTY 50 · Golden Ratio ORB Strategy</p>
+    </div>
+    <div class="market-layout">
+      <div class="card chart-card">
+        <div class="card-header">
+          <span class="card-title">Price Action</span>
         </div>
+        <div class="chart-wrap">
+          <canvas id="price-chart" role="img" aria-label="NIFTY 50 price chart"></canvas>
+        </div>
+      </div>
+      <div class="market-aside">
+        <div class="card aside-card" id="or-display" style="display:none;">
+          <div class="card-header">
+            <span class="card-title">Opening Range</span>
+            <span class="card-sub">9:15 – 9:30 AM</span>
+          </div>
+          <div class="or-stats">
+            <div class="or-row"><span class="or-label">High</span><span class="or-val mono" id="or-high">—</span></div>
+            <div class="or-row"><span class="or-label">Low</span><span class="or-val mono" id="or-low">—</span></div>
+            <div class="or-row"><span class="or-label">Range</span><span class="or-val mono" id="or-range">—</span></div>
+          </div>
+          <div class="section-divider"></div>
+          <div class="card-header" style="margin-top:0;padding-top:0">
+            <span class="card-title">GR Breakout Levels</span>
+            <span class="card-sub">61.8% Fib</span>
+          </div>
+          <div class="gr-levels">
+            <div class="gr-row gr-call">
+              <div class="gr-indicator"><span class="gr-dot dot-green"></span><span class="gr-type">Call Entry</span></div>
+              <span class="gr-price mono" id="gr-long">—</span>
+            </div>
+            <div class="gr-row gr-put">
+              <div class="gr-indicator"><span class="gr-dot dot-red"></span><span class="gr-type">Put Entry</span></div>
+              <span class="gr-price mono" id="gr-short">—</span>
+            </div>
+          </div>
+        </div>
+        <div class="card aside-card or-placeholder-card" id="or-placeholder">
+          <div class="placeholder-content">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="14" cy="14" r="10"/><polyline points="9,14 11,16 15,11 19,14"/></svg>
+            <span class="placeholder-title">Awaiting Opening Range</span>
+            <span class="placeholder-sub">Forms at 9:30 AM IST</span>
+          </div>
+        </div>
+        <div class="card aside-card">
+          <div class="card-header">
+            <span class="card-title">Risk Meters</span>
+          </div>
+          <div class="risk-mini">
+            <div class="risk-row-mini">
+              <span class="risk-mini-label">Daily Loss</span>
+              <span class="risk-mini-val" id="daily-loss-value">Rs.0 / Rs.2,000</span>
+            </div>
+            <div class="prog-track"><div class="prog-fill" id="daily-loss-progress" style="width:0%"></div></div>
+            <div class="risk-row-mini" style="margin-top:14px">
+              <span class="risk-mini-label">Trades Today</span>
+              <span class="risk-mini-val" id="trades-count-value">0 / 2</span>
+            </div>
+            <div class="prog-track"><div class="prog-fill prog-trades" id="trades-count-progress" style="width:0%"></div></div>
+            <div class="risk-row-mini" style="margin-top:14px">
+              <span class="risk-mini-label">Circuit Breaker</span>
+              <span class="status-ok" id="circuit-breaker">ARMED</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
+  </section>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
-    <script src="dashboard.js"></script>
+  <!-- SECTION: Position -->
+  <section class="content-section" id="sec-position" aria-label="Current Position">
+    <div class="section-head">
+      <h2 class="section-title">Position</h2>
+      <p class="section-sub">Active trade monitoring</p>
+    </div>
+    <div id="position-panel" class="card position-card" style="display:none;">
+      <div class="position-alert-bar">
+        <span class="active-pulse"></span>
+        <span class="alert-text">ACTIVE TRADE</span>
+      </div>
+      <div class="position-grid">
+        <div class="pos-field"><span class="pos-field-label">Instrument</span><span class="pos-field-value mono" id="pos-instrument">—</span></div>
+        <div class="pos-field"><span class="pos-field-label">Direction</span><span class="pos-field-value" id="pos-direction">—</span></div>
+        <div class="pos-field"><span class="pos-field-label">Entry Price</span><span class="pos-field-value mono" id="pos-entry">—</span></div>
+        <div class="pos-field"><span class="pos-field-label">Current Price</span><span class="pos-field-value mono" id="pos-current">—</span></div>
+        <div class="pos-field pos-pnl-field"><span class="pos-field-label">Unrealised P&amp;L</span><span class="pos-field-value pos-pnl-val" id="pos-pnl">—</span></div>
+        <div class="pos-field"><span class="pos-field-label">Time Held</span><span class="pos-field-value" id="pos-duration">—</span></div>
+      </div>
+    </div>
+    <div class="empty-state" id="position-empty">
+      <div class="empty-icon">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+          <circle cx="20" cy="20" r="15"/>
+          <line x1="20" y1="13" x2="20" y2="21"/>
+          <circle cx="20" cy="26" r="1.2" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <p class="empty-title">No Active Position</p>
+      <p class="empty-sub">Waiting for Golden Ratio breakout signal after 9:30 AM IST</p>
+    </div>
+  </section>
+
+  <!-- SECTION: Risk -->
+  <section class="content-section" id="sec-risk" aria-label="Risk and Safety">
+    <div class="section-head">
+      <h2 class="section-title">Risk &amp; Safety</h2>
+      <p class="section-sub">Automated guardrails and emergency controls</p>
+    </div>
+    <div class="card kill-card">
+      <div class="kill-header">
+        <div class="kill-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/>
+            <line x1="12" y1="7" x2="12" y2="12"/>
+            <circle cx="12" cy="16" r="0.8" fill="currentColor" stroke="none"/>
+          </svg>
+        </div>
+        <div class="kill-info">
+          <div class="kill-title">Emergency Kill Switch</div>
+          <div class="kill-desc">Closes all positions and halts the bot immediately</div>
+        </div>
+      </div>
+      <button id="kill-switch-btn" class="kill-btn" aria-label="Activate emergency kill switch">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="8" cy="8" r="6"/><line x1="8" y1="4" x2="8" y2="8"/>
+        </svg>
+        KILL SWITCH
+      </button>
+    </div>
+  </section>
+
+  <!-- SECTION: Performance -->
+  <section class="content-section" id="sec-performance" aria-label="Performance">
+    <div class="section-head">
+      <h2 class="section-title">Performance</h2>
+      <p class="section-sub">Phase 2 target: Cost-adjusted Profit Factor &gt; 1.2 over 60+ trades</p>
+    </div>
+    <div class="kpi-grid">
+      <div class="card kpi-card">
+        <div class="kpi-header">Total Trades</div>
+        <div class="kpi-big" id="total-trades">0</div>
+        <div class="kpi-foot">
+          <span class="tag tag-green"><span id="total-wins">0</span>&thinsp;W</span>
+          <span class="tag tag-red"><span id="total-losses">0</span>&thinsp;L</span>
+        </div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-header">Win Rate</div>
+        <div class="kpi-split">
+          <div class="kpi-half"><div class="kpi-sublabel">Raw</div><div class="kpi-big" id="win-rate-raw">0%</div></div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-half"><div class="kpi-sublabel">Cost-Adj</div><div class="kpi-big" id="win-rate-adjusted">0%</div></div>
+        </div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-header">Profit Factor</div>
+        <div class="kpi-split">
+          <div class="kpi-half"><div class="kpi-sublabel">Raw</div><div class="kpi-big" id="profit-factor-raw">0.00</div></div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-half"><div class="kpi-sublabel">Cost-Adj</div><div class="kpi-big" id="profit-factor-adjusted">0.00</div></div>
+        </div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-header">Total P&amp;L</div>
+        <div class="kpi-split">
+          <div class="kpi-half"><div class="kpi-sublabel">Raw</div><div class="kpi-big" id="pnl-raw">Rs.0</div></div>
+          <div class="kpi-divider"></div>
+          <div class="kpi-half"><div class="kpi-sublabel">Cost-Adj</div><div class="kpi-big" id="pnl-adjusted">Rs.0</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card chart-card equity-card">
+      <div class="card-header">
+        <span class="card-title">Equity Curve</span>
+        <span class="card-sub">Cost-adjusted running P&amp;L</span>
+      </div>
+      <div class="chart-wrap chart-wrap-equity">
+        <canvas id="equity-chart" role="img" aria-label="Equity curve"></canvas>
+      </div>
+    </div>
+    <div class="card cost-card">
+      <div class="card-header">
+        <span class="card-title">Cost Analysis</span>
+        <span class="card-sub">Brokerage + STT + SEBI charges</span>
+      </div>
+      <div class="cost-stats">
+        <div class="cost-stat-item">
+          <span class="cost-stat-label">Avg Cost / Trade</span>
+          <span class="cost-stat-val" id="avg-cost-percent">0%</span>
+          <span class="cost-stat-sub">of raw P&amp;L</span>
+        </div>
+        <div class="cost-stat-item">
+          <span class="cost-stat-label">Total Costs Paid</span>
+          <span class="cost-stat-val" id="total-costs">Rs.0</span>
+        </div>
+        <div class="cost-stat-item">
+          <span class="cost-stat-label">Trades Reversed</span>
+          <span class="cost-stat-val" id="trades-erased">0</span>
+          <span class="cost-stat-sub">profit to loss after costs</span>
+        </div>
+      </div>
+      <div class="verdict-section">
+        <div class="verdict-label">Cost-Adjusted Profit Factor</div>
+        <div class="verdict-track">
+          <div class="verdict-zone vz-fail"><span>FAIL &lt;1.0</span></div>
+          <div class="verdict-zone vz-marginal"><span>MARGINAL 1.0–1.2</span></div>
+          <div class="verdict-zone vz-pass"><span>PASS &gt;1.2</span></div>
+          <div class="verdict-needle" id="pf-indicator" style="left:50%"></div>
+        </div>
+        <div class="verdict-msg" id="verdict-message">Collecting data — need 30+ trades for a reliable assessment</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION: Trades -->
+  <section class="content-section" id="sec-trades" aria-label="Trade Journal">
+    <div class="section-head">
+      <h2 class="section-title">Trade Journal</h2>
+      <p class="section-sub">Full history of sandbox executions</p>
+    </div>
+    <div class="card trades-card">
+      <div class="table-toolbar">
+        <div class="toolbar-filters">
+          <div class="filter-group">
+            <label class="filter-label" for="outcome-filter">Outcome</label>
+            <select id="outcome-filter" class="filter-select">
+              <option value="all">All Trades</option>
+              <option value="WIN">Wins</option>
+              <option value="LOSS">Losses</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label class="filter-label" for="exit-filter">Exit Reason</label>
+            <select id="exit-filter" class="filter-select">
+              <option value="all">All Reasons</option>
+              <option value="STOP_LOSS">Stop Loss</option>
+              <option value="TARGET">Target Hit</option>
+              <option value="HARD_EXIT">Hard Exit</option>
+            </select>
+          </div>
+        </div>
+        <button id="export-csv-btn" class="export-btn" aria-label="Export to CSV">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <line x1="6.5" y1="1" x2="6.5" y2="8.5"/>
+            <polyline points="4,6 6.5,8.5 9,6"/>
+            <path d="M1 10v2h11v-2"/>
+          </svg>
+          Export CSV
+        </button>
+      </div>
+      <div class="table-scroller">
+        <table id="trades-table" aria-label="Trade history">
+          <thead>
+            <tr>
+              <th>Date</th><th>Time</th><th>Instrument</th><th>Dir</th>
+              <th class="num">Entry</th><th class="num">Exit</th>
+              <th>Reason</th><th>Duration</th>
+              <th class="num">Raw P&amp;L</th><th class="num">Costs</th>
+              <th class="num">Adj P&amp;L</th><th>Result</th>
+            </tr>
+          </thead>
+          <tbody id="trades-tbody">
+            <tr><td colspan="12" class="table-empty-cell">
+              <div class="table-empty">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="21"/></svg>
+                No trades yet — waiting for opening range at 9:30 AM
+              </div>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION: Health -->
+  <section class="content-section" id="sec-health" aria-label="System Health">
+    <div class="section-head">
+      <h2 class="section-title">System Health</h2>
+      <p class="section-sub">WebSocket, data pipeline, and error monitoring</p>
+    </div>
+    <div class="health-stats">
+      <div class="card health-card"><span class="health-label">WebSocket</span><span class="health-value status-unknown" id="ws-status">Unknown</span></div>
+      <div class="card health-card"><span class="health-label">Last Data</span><span class="health-value" id="data-timestamp">Never</span></div>
+      <div class="card health-card"><span class="health-label">Candles Today</span><span class="health-value mono" id="candles-count">0</span></div>
+    </div>
+    <div class="card log-card">
+      <div class="card-header">
+        <span class="card-title">Error &amp; Warning Log</span>
+        <span class="log-hint">Most recent first</span>
+      </div>
+      <div class="log-body" id="error-log">
+        <div class="log-entry log-ok">No errors or warnings — system nominal</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="page-footer" role="contentinfo">
+    <div class="footer-left"><span class="footer-readonly">READ-ONLY</span> Dashboard does not control or modify bot behavior</div>
+    <div class="footer-right">Auto-refresh every 5s · Phase 2 Sandbox Validation</div>
+  </footer>
+
+</main>
+
+<!-- KILL SWITCH MODAL -->
+<div id="kill-switch-modal" class="modal-backdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="modal-h">
+  <div class="modal-box">
+    <div class="modal-icon-wrap">
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <circle cx="18" cy="18" r="14"/>
+        <line x1="18" y1="10" x2="18" y2="18"/>
+        <circle cx="18" cy="23.5" r="1.2" fill="currentColor" stroke="none"/>
+      </svg>
+    </div>
+    <h2 class="modal-title" id="modal-h">Activate Kill Switch?</h2>
+    <p class="modal-body-text">This action will immediately:</p>
+    <ul class="modal-list">
+      <li>Close all open positions at market price</li>
+      <li>Stop the trading bot process</li>
+      <li>Block all new trades until manually restarted</li>
+    </ul>
+    <p class="modal-warning">This cannot be automatically undone. Requires manual restart.</p>
+    <div class="modal-actions">
+      <button id="cancel-kill-switch" class="modal-cancel">Cancel</button>
+      <button id="confirm-kill-switch" class="modal-confirm">Activate Kill Switch</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+<script src="dashboard.js"></script>
+<script>
+  // Live IST clock
+  function updateClock() {
+    const el = document.getElementById('topbar-clock');
+    if (el) el.textContent = new Date().toLocaleTimeString('en-IN', { hour12: false, timeZone: 'Asia/Kolkata' }) + ' IST';
+  }
+  updateClock(); setInterval(updateClock, 1000);
+
+  // Scroll-spy sidebar
+  const navMap = { 'sec-market':'nav-market','sec-position':'nav-position','sec-risk':'nav-risk','sec-performance':'nav-performance','sec-trades':'nav-trades','sec-health':'nav-health' };
+  const allNI = document.querySelectorAll('.nav-item');
+  const spy = new IntersectionObserver(entries => entries.forEach(e => { if (e.isIntersecting) { allNI.forEach(n => n.classList.remove('active')); const ni = navMap[e.target.id]; if (ni) document.getElementById(ni)?.classList.add('active'); } }), { rootMargin: '-35% 0px -55% 0px', threshold: 0 });
+  Object.keys(navMap).forEach(id => { const el = document.getElementById(id); if (el) spy.observe(el); });
+  allNI.forEach(item => item.addEventListener('click', e => { e.preventDefault(); const t = document.querySelector(item.getAttribute('href')); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+
+  // Position empty state
+  const posPanel = document.getElementById('position-panel');
+  const posEmpty = document.getElementById('position-empty');
+  function syncPos() { if (!posPanel||!posEmpty) return; posEmpty.style.display = posPanel.style.display==='none' ? 'flex' : 'none'; }
+  if (posPanel) { new MutationObserver(syncPos).observe(posPanel, { attributes: true, attributeFilter: ['style'] }); syncPos(); }
+
+  // OR placeholder toggle
+  const orD = document.getElementById('or-display');
+  const orP = document.getElementById('or-placeholder');
+  if (orD && orP) new MutationObserver(() => { orP.style.display = orD.style.display==='none' ? 'flex' : 'none'; }).observe(orD, { attributes: true, attributeFilter: ['style'] });
+
+  // Modal: Escape + backdrop click
+  document.addEventListener('keydown', e => { if (e.key==='Escape') { const m = document.getElementById('kill-switch-modal'); if (m && m.style.display!=='none') m.style.display='none'; } });
+  document.getElementById('kill-switch-modal')?.addEventListener('click', function(e) { if (e.target===this) this.style.display='none'; });
+</script>
 </body>
 </html>
