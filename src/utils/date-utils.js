@@ -1,4 +1,4 @@
-import { format, parse, isWeekend, addDays } from 'date-fns';
+import { format, parse, isWeekend, addDays, subDays } from 'date-fns';
 import { toZonedTime, fromZonedTime } from 'date-fns-tz';
 
 const IST_TIMEZONE = 'Asia/Kolkata';
@@ -42,7 +42,32 @@ const NSE_HOLIDAYS_2025 = [
   '2025-12-25', // Christmas
 ];
 
-const NSE_HOLIDAYS = [...NSE_HOLIDAYS_2024, ...NSE_HOLIDAYS_2025];
+// NSE Market Holidays 2026 (must keep in sync with SessionManager.loadTradingHolidays())
+const NSE_HOLIDAYS_2026 = [
+  '2026-01-26', // Republic Day
+  '2026-03-01', // Mahashivratri
+  '2026-03-14', // Holi
+  '2026-03-30', // Ram Navami
+  '2026-04-02', // Mahavir Jayanti
+  '2026-04-03', // Good Friday
+  '2026-04-06', // Id-ul-Fitr
+  '2026-04-14', // Dr. Ambedkar Jayanti
+  '2026-05-01', // Maharashtra Day
+  '2026-06-13', // Id-ul-Adha
+  '2026-07-13', // Moharram
+  '2026-08-15', // Independence Day
+  '2026-08-25', // Janmashtami
+  '2026-09-02', // Ganesh Chaturthi
+  '2026-09-12', // Id-e-Milad
+  '2026-10-02', // Mahatma Gandhi Jayanti
+  '2026-10-17', // Dussehra
+  '2026-11-04', // Diwali Laxmi Puja
+  '2026-11-05', // Diwali Balipratipada
+  '2026-11-20', // Gurunanak Jayanti
+  '2026-12-25', // Christmas
+];
+
+const NSE_HOLIDAYS = [...NSE_HOLIDAYS_2024, ...NSE_HOLIDAYS_2025, ...NSE_HOLIDAYS_2026];
 
 export function isTradingDay(date) {
   const dateStr = format(date, 'yyyy-MM-dd');
@@ -58,6 +83,18 @@ export function isTradingDay(date) {
   }
   
   return true;
+}
+
+/**
+ * Get the most recent trading day strictly before `date`.
+ * Walks backward day-by-day, skipping weekends and NSE holidays.
+ */
+export function getPreviousTradingDay(date) {
+  let prev = subDays(date, 1);
+  while (!isTradingDay(prev)) {
+    prev = subDays(prev, 1);
+  }
+  return prev;
 }
 
 export function getNextTradingDay(date) {

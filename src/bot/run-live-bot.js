@@ -113,11 +113,9 @@ class LiveBotRunner {
         timezone: 'Asia/Kolkata'
       });
       this.components.candleHistory = new CandleHistory(500);
-      
-      // Link candle builder to history
-      this.components.candleBuilder.on('candle', (candle) => {
-        this.components.candleHistory.addCandle(candle);
-      });
+      // NOTE: candleHistory is populated by BotEngine.onCandleComplete() — do NOT add a
+      // second 'candle' listener here. A double-subscription causes every candle to be
+      // stored twice, which corrupts opening range accuracy (15 entries cover only ~7 minutes).
       
       logger.info('✅ Candle builder initialized');
 
@@ -191,9 +189,9 @@ class LiveBotRunner {
 
       logger.info('✅ Pre-market checks passed');
 
-      // Connect WebSocket
+      // Connect WebSocket with retry logic
       logger.info('Connecting to Upstox WebSocket...');
-      await this.components.wsClient.connect();
+      await this.connectWebSocketWithRetry();
       logger.info('✅ WebSocket connected');
 
       // Subscribe to multiple instruments for better tick coverage

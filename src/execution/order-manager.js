@@ -170,12 +170,16 @@ class OrderManager {
       try {
         // Place opposite order to close position
         const exitOrder = {
-          instrument_key: position.instrument_key,
+          instrument_token: position.instrument_token || position.instrument_key,  // HFT uses instrument_token
           quantity: Math.abs(position.quantity),
           transaction_type: position.quantity > 0 ? 'SELL' : 'BUY',
           order_type: 'MARKET',
           product: position.product,
-          validity: 'DAY'
+          validity: 'DAY',
+          price: 0,
+          trigger_price: 0,
+          disclosed_quantity: 0,
+          is_amo: false
         };
 
         await this.placeOrder(exitOrder);

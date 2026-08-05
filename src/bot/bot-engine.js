@@ -1,7 +1,9 @@
 import { EventEmitter } from 'events';
 import { format } from 'date-fns';
+import fs from 'fs';
+import path from 'path';
 import { logger } from '../utils/logger.js';
-import { toIST } from '../utils/date-utils.js';
+import { toIST, getPreviousTradingDay } from '../utils/date-utils.js';
 import GoldenRatioStrategy from '../strategy/golden-ratio-strategy.js';
 
 /**
@@ -235,20 +237,85 @@ export class BotEngine extends EventEmitter {
    * Fetch previous day's high/low/close for Golden Ratio
    */
   async fetchPreviousDayData() {
+    logger.info('Fetching previous day data for Golden Ratio calculation');
+    
+    const underlying = this.config.trading.instruments[0] || 'NIFTY';
+    const today = toIST(new Date());
+    const prevTradingDay = getPreviousTradingDay(today);
+    const prevDateStr = format(prevTradingDay, 'yyyy-MM-dd');
+    
+    logger.info('Previous trading day identified', { prevDateStr });
+    
+    // Step 1: Try local disk cache (data/NIFTY_YYYY-MM-DD.json)
+    const cacheFile = path.join(process.cwd(), 'data', `${underlying}_${prevDateStr}.json`);
+    let candles = null;
+    
     try {
-      // In live mode, fetch from historical API or use yesterday's data
-      // For now, placeholder
-      logger.info('Fetching previous day data for Golden Ratio calculation');
-      
-      // TODO: Implement actual previous day data fetch
-      // This would query historical candles from yesterday
-      
-      this.previousDayData = null; // Will be implemented with historical data
-    } catch (error) {
-      logger.error('Failed to fetch previous day data', {
-        error: error.message
+      if (fs.existsSync(cacheFile)) {
+        const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+        // Cache stores arrays of candle objects with timestamp strings
+        candles = raw.map(c => ({ ...c, timestamp: new Date(c.timestamp) }));
+        logger.info('Previous day data loaded from local cache', {
+          prevDateStr,
+          candleCount: candles.length,
+          source: 'DISK_CACHE'
+        });
+      }
+    } catch (cacheErr) {
+      logger.warn('Failed to read previous day cache file', {
+        file: cacheFile,
+        error: cacheErr.message
       });
     }
+    
+    // Step 2: Fall back to live historical API if cache miss
+    if (!candles || candles.length === 0) {
+      logger.info('Cache miss — fetching from historical API', { prevDateStr });
+      try {
+        candles = await this.upstoxClient.getHistoricalData(
+          underlying,
+          '1minute',
+          prevDateStr,
+          prevDateStr
+        );
+        logger.info('Previous day data fetched from API', {
+          prevDateStr,
+          candleCount: candles ? candles.length : 0,
+          source: 'HISTORICAL_API'
+        });
+      } catch (apiErr) {
+        logger.error('Historical API fetch failed for previous day data', {
+          prevDateStr,
+          error: apiErr.message
+        });
+        candles = null;
+      }
+    }
+    
+    // Step 3: Compute high/low/close — or block trading if data unavailable
+    if (!candles || candles.length === 0) {
+      logger.error(
+        '⚠️  TRADING BLOCKED: Cannot fetch previous day data for Golden Ratio calculation. ' +
+        'Bot will NOT enter any trades today. Restart with valid token or after cache is populated.',
+        { prevDateStr, underlying }
+      );
+      this.previousDayData = null;
+      return;
+    }
+    
+    const high  = Math.max(...candles.map(c => c.high));
+    const low   = Math.min(...candles.map(c => c.low));
+    const close = candles[candles.length - 1].close;
+    
+    this.previousDayData = { high, low, close, range: high - low, date: prevDateStr };
+    
+    logger.info('✅ Previous day data ready for Golden Ratio', {
+      prevDateStr,
+      high:  high.toFixed(2),
+      low:   low.toFixed(2),
+      close: close.toFixed(2),
+      range: (high - low).toFixed(2)
+    });
   }
 
   /**
@@ -340,25 +407,48 @@ export class BotEngine extends EventEmitter {
       return;
     }
 
-    const fibLevel = this.config.goldenRatio?.fibonacciLevel || 0.618;
-
-    // If we have previous day data, use it
-    let fibRange = 0;
-    if (this.previousDayData) {
-      fibRange = this.previousDayData.range * fibLevel;
+    // CRITICAL: If previous day data is unavailable, we cannot compute Golden Ratio
+    // levels. Leaving goldenRatioLevels = null causes checkEntrySignal() to block
+    // trading — intentionally. Do NOT fall back to an unvalidated formula.
+    if (!this.previousDayData) {
+      logger.error(
+        '⚠️  Golden Ratio levels NOT calculated: previous day data unavailable. ' +
+        'No trades will be placed today.',
+        { openingRange: this.openingRange }
+      );
+      this.goldenRatioLevels = null;
+      return;
     }
 
-    // Golden Ratio levels: OR high/low + small buffer
-    const buffer = fibRange > 0 ? fibRange * 0.1 : this.openingRange.range * 0.1;
+    const fibLevel = this.config.goldenRatio?.fibonacciLevel || 0.618;
+
+    // Exact formula from GoldenRatioStrategy (the backtest-validated version):
+    //   buffer = prevDayRange * fibLevel * 0.1
+    //   longEntry  = openingRange.high + buffer
+    //   shortEntry = openingRange.low  - buffer
+    const fibRange = this.previousDayData.range * fibLevel;
+    const buffer   = fibRange * 0.1;
 
     this.goldenRatioLevels = {
-      longEntry: this.openingRange.high + buffer,
-      shortEntry: this.openingRange.low - buffer,
-      method: this.previousDayData ? 'GOLDEN_RATIO' : 'OPENING_RANGE',
-      fibRange
+      longEntry:  this.openingRange.high + buffer,
+      shortEntry: this.openingRange.low  - buffer,
+      method:     'GOLDEN_RATIO',
+      fibRange,
+      buffer,
+      prevDayRange: this.previousDayData.range,
+      prevDayDate:  this.previousDayData.date
     };
 
-    logger.info('Golden Ratio levels calculated', this.goldenRatioLevels);
+    logger.info('✅ Golden Ratio levels calculated (backtest-identical formula)', {
+      prevDayHigh:  this.previousDayData.high.toFixed(2),
+      prevDayLow:   this.previousDayData.low.toFixed(2),
+      prevDayRange: this.previousDayData.range.toFixed(2),
+      fibLevel,
+      fibRange:     fibRange.toFixed(2),
+      buffer:       buffer.toFixed(2),
+      longEntry:    this.goldenRatioLevels.longEntry.toFixed(2),
+      shortEntry:   this.goldenRatioLevels.shortEntry.toFixed(2)
+    });
 
     this.emit('golden_ratio_calculated', this.goldenRatioLevels);
   }
@@ -401,6 +491,12 @@ export class BotEngine extends EventEmitter {
    */
   async checkEntrySignal(candle) {
     if (!this.goldenRatioLevels) {
+      // This is expected when previousDayData was unavailable at startup.
+      // Log once to avoid log spam, then return.
+      if (!this._loggedNoPrevData) {
+        logger.warn('No Golden Ratio levels — previous day data unavailable. Trading blocked for today.');
+        this._loggedNoPrevData = true;
+      }
       return;
     }
 
@@ -490,15 +586,46 @@ export class BotEngine extends EventEmitter {
         return;
       }
 
-      // Place order (placeholder - would use actual order manager)
-      logger.info('Placing entry order', {
+      // ── SANDBOX ORDER PLACEMENT ──────────────────────────────────────
+      // All orders route through orderManager → upstoxClient.placeOrder()
+      // → api-hft.upstox.com (sandbox). No real capital is at risk.
+      logger.info('Placing entry order via sandbox', {
         instrument: instrument.tradingSymbol,
+        instrumentKey: instrument.instrumentKey,
         side: 'BUY',
         quantity: positionSize.quantity,
         price: quote.askPrice
       });
 
-      // Create position
+      let entryOrderId;
+      try {
+        const orderResponse = await this.orderManager.placeOrder({
+          instrument_token: instrument.instrumentKey,  // HFT endpoint uses instrument_token
+          quantity: positionSize.quantity,
+          transaction_type: 'BUY',
+          order_type: 'MARKET',
+          product: 'I',      // Intraday
+          validity: 'DAY',
+          price: 0,          // 0 for MARKET orders
+          trigger_price: 0,  // required by HFT endpoint
+          disclosed_quantity: 0,
+          is_amo: false,
+          tag: 'ORB-ENTRY'
+        });
+        entryOrderId = orderResponse.orderId;
+        logger.info('✅ Sandbox entry order placed', { entryOrderId });
+      } catch (orderErr) {
+        // Order placement failed — do NOT open a local position for a failed order.
+        // This prevents phantom positions that would corrupt P&L accounting.
+        logger.error('❌ Sandbox entry order FAILED — trade NOT taken', {
+          instrument: instrument.tradingSymbol,
+          error: orderErr.message
+        });
+        return;
+      }
+      // ────────────────────────────────────────────────────────────────
+
+      // Create position using real sandbox order ID
       const targetPercent = this.config.strategy?.targetPercent || 2.0;
       const target = quote.askPrice * (1 + targetPercent / 100);
 
@@ -510,7 +637,10 @@ export class BotEngine extends EventEmitter {
         entryPrice: quote.askPrice,
         stopLoss,
         target,
-        orderId: 'ORDER-' + Date.now() // Placeholder
+        orderId: entryOrderId,       // Real sandbox order ID
+        entryBid: quote.bidPrice,    // Capture spread at entry for journal
+        entryAsk: quote.askPrice,
+        entrySpread: quote.spread
       });
 
       this.riskManager.incrementTradeCount();
@@ -521,7 +651,8 @@ export class BotEngine extends EventEmitter {
 
     } catch (error) {
       logger.error('Failed to enter trade', {
-        error: error.message
+        error: error.message,
+        stack: error.stack
       });
     }
   }
@@ -601,53 +732,92 @@ export class BotEngine extends EventEmitter {
         this.spotPrice
       );
 
-      // Close position (placeholder - would use actual order manager)
-      logger.info('Closing position', {
+      // ── SANDBOX EXIT ORDER ───────────────────────────────────────────
+      // SELL to close the option position via sandbox.
+      // Even on failure we still close the local position (can't leave
+      // a stuck open position in the tracker with no exit recorded).
+      logger.info('Placing exit order via sandbox', {
         id: pos.id,
         reason,
+        instrument: this.selectedInstrument.tradingSymbol,
         exitPrice: quote.bidPrice
       });
+
+      let exitOrderId = null;
+      try {
+        const exitResponse = await this.orderManager.placeOrder({
+          instrument_token: this.selectedInstrument.instrumentKey,  // HFT endpoint uses instrument_token
+          quantity: pos.quantity,
+          transaction_type: 'SELL',
+          order_type: 'MARKET',
+          product: 'I',
+          validity: 'DAY',
+          price: 0,
+          trigger_price: 0,  // required by HFT endpoint
+          disclosed_quantity: 0,
+          is_amo: false,
+          tag: 'ORB-EXIT'
+        });
+        exitOrderId = exitResponse.orderId;
+        logger.info('✅ Sandbox exit order placed', { exitOrderId });
+      } catch (exitErr) {
+        // Log critically but still close locally — a failed exit order
+        // must be investigated manually but we cannot leave a stale
+        // open position in the tracker.
+        logger.error('❌ Sandbox exit order FAILED — position closed locally only. MANUAL REVIEW REQUIRED.', {
+          positionId: pos.id,
+          instrument: this.selectedInstrument.tradingSymbol,
+          error: exitErr.message
+        });
+      }
+      // ────────────────────────────────────────────────────────────────
 
       const closedPosition = this.positionTracker.closePosition(pos.id, {
         exitPrice: quote.bidPrice,
         reason,
-        orderId: 'ORDER-EXIT-' + Date.now()
+        orderId: exitOrderId     // Real sandbox exit order ID (null if order failed)
       });
 
-      // Calculate costs
+      // Calculate costs — include actual bid/ask spread captured at both legs
       const trade = {
         id: closedPosition.id,
         instrument: closedPosition.instrument,
         quantity: closedPosition.quantity,
         entry: {
-          price: closedPosition.entryPrice,
-          spread: 0 // TODO: Get from actual entry
+          price:  closedPosition.entryPrice,
+          spread: pos.entrySpread || 0,    // Spread captured when position was opened
+          bid:    pos.entryBid,
+          ask:    pos.entryAsk,
+          orderId: closedPosition.orderId  // Real entry order ID
         },
         exit: {
-          price: closedPosition.exitPrice,
-          spread: 0 // TODO: Get from actual exit
+          price:  closedPosition.exitPrice,
+          spread: quote.spread || 0,       // Spread at exit time
+          bid:    quote.bidPrice,
+          ask:    quote.askPrice,
+          orderId: exitOrderId             // Real exit order ID
         }
       };
 
       const costs = this.costCalculator.calculateTradeCosts(trade);
 
-      // Log to trade journal
+      // Log to trade journal with real order IDs and spread data
       await this.tradeJournal.logTrade({
         ...trade,
         entry: {
-          time: closedPosition.entryTime,
+          time:      closedPosition.entryTime,
           fillPrice: closedPosition.entryPrice,
-          premium: closedPosition.entryPrice,
+          premium:   closedPosition.entryPrice,
           ...trade.entry
         },
         exit: {
-          time: closedPosition.exitTime,
-          reason: closedPosition.exitReason,
+          time:      closedPosition.exitTime,
+          reason:    closedPosition.exitReason,
           fillPrice: closedPosition.exitPrice,
           ...trade.exit
         },
-        pnl: costs.pnl,
-        costs: costs.costs,
+        pnl:     costs.pnl,
+        costs:   costs.costs,
         verdict: costs.verdict
       });
 
@@ -666,7 +836,8 @@ export class BotEngine extends EventEmitter {
 
     } catch (error) {
       logger.error('Failed to close position', {
-        error: error.message
+        error: error.message,
+        stack: error.stack
       });
     }
   }

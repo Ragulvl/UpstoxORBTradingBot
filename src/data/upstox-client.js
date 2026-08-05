@@ -160,7 +160,8 @@ class UpstoxClient {
       });
       
       // Use sandbox endpoint and token for orders
-      const url = `${this.getBaseUrl(true)}/order/place`;
+      // NOTE: api-hft.upstox.com requires the /v2 version prefix (sandboxUrl has no version)
+      const url = `${this.getBaseUrl(true)}/v2/order/place`;
       
       const response = await axios.post(url, orderParams, {
         headers: this.getHeaders(true) // Use sandbox token
@@ -186,7 +187,7 @@ class UpstoxClient {
     try {
       this.logger.info('Modifying order (sandbox)', { orderId, modifications });
       
-      const url = `${this.getBaseUrl(true)}/order/modify`;
+      const url = `${this.getBaseUrl(true)}/v2/order/modify`;
       
       const response = await axios.put(url, {
         order_id: orderId,
@@ -212,7 +213,7 @@ class UpstoxClient {
     try {
       this.logger.info('Cancelling order (sandbox)', { orderId });
       
-      const url = `${this.getBaseUrl(true)}/order/cancel`;
+      const url = `${this.getBaseUrl(true)}/v2/order/cancel`;
       
       const response = await axios.delete(url, {
         headers: this.getHeaders(true), // Use sandbox token
@@ -234,7 +235,7 @@ class UpstoxClient {
 
   async getOrderStatus(orderId) {
     try {
-      const url = `${this.getBaseUrl(true)}/order/history`;
+      const url = `${this.getBaseUrl(true)}/v2/order/history`;
       
       const response = await axios.get(url, {
         headers: this.getHeaders(true), // Use sandbox token
@@ -254,7 +255,7 @@ class UpstoxClient {
 
   async getPositions() {
     try {
-      const url = `${this.getBaseUrl(true)}/portfolio/short-term-positions`;
+      const url = `${this.getBaseUrl(true)}/v2/portfolio/short-term-positions`;
       
       const response = await axios.get(url, {
         headers: this.getHeaders(true) // Use sandbox token
