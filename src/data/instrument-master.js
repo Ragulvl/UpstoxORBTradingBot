@@ -468,7 +468,7 @@ export class InstrumentMaster {
     const expiryStr = currentExpiry.toISOString().split('T')[0];
 
     // Generate NIFTY options
-    const niftySpot = 22000;
+    const niftySpot = 24600; // Updated to current NIFTY level (Aug 2026)
     for (let strikeOffset = -500; strikeOffset <= 500; strikeOffset += 50) {
       const strike = niftySpot + strikeOffset;
       
@@ -482,7 +482,7 @@ export class InstrumentMaster {
         expiry: expiryStr,
         strike: strike.toString(),
         option_type: 'CE',
-        lot_size: '50',
+        lot_size: '65',  // NIFTY lot size as of 2026 (confirmed from live market data)
         tick_size: '0.05'
       });
 
@@ -496,7 +496,7 @@ export class InstrumentMaster {
         expiry: expiryStr,
         strike: strike.toString(),
         option_type: 'PE',
-        lot_size: '50',
+        lot_size: '65',  // NIFTY lot size as of 2026 (confirmed from live market data)
         tick_size: '0.05'
       });
     }
