@@ -19,14 +19,15 @@ export class CostCalculator {
     this.config = config;
     
     // Default Indian F&O cost structure (verify against broker)
+    // Rates based on Zerodha (most common discount broker in India):
     this.costs = {
-      brokeragePerOrder: config.costs?.brokerage_per_order || 20, // ₹20 per order
-      brokeragePercent: config.costs?.brokerage_percent || 0.0005, // 0.05% of premium
-      sttRate: config.costs?.stt_rate || 0.000625, // 0.0625% on sell side
-      exchangeRate: config.costs?.exchange_rate || 0.00053, // 0.053% of turnover
-      sebiRate: config.costs?.sebi_rate || 0.0000001, // ₹10 per ₹1 crore
-      gstRate: config.costs?.gst_rate || 0.18, // 18% on brokerage + exchange + SEBI
-      stampDutyRate: config.costs?.stamp_duty_rate || 0.00003 // 0.003% on buy side
+      brokeragePerOrder: config.costs?.brokerage_per_order || 20,      // ₹20 per order (flat)
+      brokeragePercent: config.costs?.brokerage_percent || 0.0003,     // 0.03% of premium (Zerodha actual)
+      sttRate: config.costs?.stt_rate || 0.000625,                     // 0.0625% on sell side only
+      exchangeRate: config.costs?.exchange_rate || 0.00053,            // 0.053% of turnover (both sides)
+      sebiRate: config.costs?.sebi_rate || 0.0000001,                  // ₹10 per ₹1 crore turnover
+      gstRate: config.costs?.gst_rate || 0.18,                         // 18% on brokerage + exchange + SEBI
+      stampDutyRate: config.costs?.stamp_duty_rate || 0.00003          // 0.003% on buy side only
     };
 
     logger.info('Cost calculator initialized', this.costs);

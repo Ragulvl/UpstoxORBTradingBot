@@ -12,7 +12,8 @@
     "bot": "node src/index.js",
     "live": "node src/bot/run-live-bot.js",
     "dashboard": "node dashboard/server.js",
-    "test": "echo \"Tests coming soon\""
+    "test": "node --test tests/*.test.js",
+    "test:watch": "node --test --watch tests/*.test.js"
   },
   "keywords": [
     "trading",

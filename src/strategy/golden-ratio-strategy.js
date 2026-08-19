@@ -26,6 +26,9 @@ class GoldenRatioStrategy extends ORBStrategy {
   reset() {
     super.reset();
     this.previousDayData = null;
+    // FIX: also clear goldenRatioLevels so stale levels from a previous day
+    // don't bleed into the next trading day when processDay() is called.
+    this.goldenRatioLevels = null;
   }
 
   /**
@@ -83,17 +86,24 @@ class GoldenRatioStrategy extends ORBStrategy {
     const fibRange = previousDayData.range * this.fibLevel;
 
     // Golden Ratio entry levels:
-    // Long: Opening range high + (61.8% of prev day range as buffer)
-    // Short: Opening range low - (61.8% of prev day range as buffer)
-    
-    const longEntry = openingRange.high + (fibRange * 0.1); // 10% of fib range as buffer
-    const shortEntry = openingRange.low - (fibRange * 0.1);
+    //   buffer = fibRange × 0.1 = prevDayRange × 0.618 × 0.1 = prevDayRange × 0.0618
+    //
+    // Practical effect: for NIFTY with a 200-pt prev-day range, buffer ≈ 12 pts.
+    // The entry is the opening range high/low PLUS this small buffer to reduce
+    // false breakouts at the exact OR boundary.
+    //
+    // NOTE: The buffer is NOT 61.8% of anything directly — it is 6.18% of the
+    // previous day's range. The "Golden Ratio" label refers to the 0.618 Fibonacci
+    // level used in its derivation.
+    const longEntry  = openingRange.high + (fibRange * 0.1); // +6.18% of prevDayRange
+    const shortEntry = openingRange.low  - (fibRange * 0.1); // -6.18% of prevDayRange
 
     this.logger.info('Golden Ratio levels calculated', {
       openingRangeHigh: openingRange.high,
       openingRangeLow: openingRange.low,
       prevDayRange: previousDayData.range,
       fibRange,
+      bufferPoints: (fibRange * 0.1).toFixed(2),
       longEntry,
       shortEntry
     });

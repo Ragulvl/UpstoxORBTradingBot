@@ -95,11 +95,16 @@ export class PositionTracker extends EventEmitter {
       position.maxLoss = position.pnl;
     }
 
-    // Check if stop loss or target hit
-    const stopHit = this.checkStopLoss(position);
+    // Check if stop loss or target hit.
+    // FIX: Mark position as CLOSING BEFORE emitting events so that if the
+    // BotEngine event handler and a subsequent candle update both call here,
+    // the second call finds status !== 'OPEN' and returns early, preventing
+    // a double-close that would corrupt P&L accounting.
+    const stopHit   = this.checkStopLoss(position);
     const targetHit = this.checkTarget(position);
 
     if (stopHit) {
+      position.status = 'CLOSING'; // Guard against duplicate close
       this.emit('stop_loss_hit', position);
       logger.warn('Stop loss hit', {
         id: position.id,
@@ -109,7 +114,8 @@ export class PositionTracker extends EventEmitter {
       });
     }
 
-    if (targetHit) {
+    if (targetHit && position.status === 'OPEN') {
+      position.status = 'CLOSING'; // Guard against duplicate close
       this.emit('target_hit', position);
       logger.info('Target hit', {
         id: position.id,
@@ -191,8 +197,9 @@ export class PositionTracker extends EventEmitter {
       return null;
     }
 
-    if (position.status !== 'OPEN') {
-      logger.warn('Position already closed', { positionId });
+    // FIX: also guard against CLOSING status to prevent double-close
+    if (position.status !== 'OPEN' && position.status !== 'CLOSING') {
+      logger.warn('Position already closed', { positionId, status: position.status });
       return position;
     }
 

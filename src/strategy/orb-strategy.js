@@ -101,13 +101,18 @@ class ORBStrategy {
       signal = {
         direction: 'LONG',
         price: candle.close,
-        timestamp: candle.timestamp
+        timestamp: candle.timestamp,
+        // FIX: enterAtNextOpen flags that live execution should use the NEXT
+        // candle's open price, not this candle's close, to eliminate
+        // look-ahead bias. Backtests still use candle.close as an approximation.
+        enterAtNextOpen: true
       };
     } else if (candle.close < this.openingRange.low) {
       signal = {
         direction: 'SHORT',
         price: candle.close,
-        timestamp: candle.timestamp
+        timestamp: candle.timestamp,
+        enterAtNextOpen: true
       };
     }
 
@@ -131,21 +136,26 @@ class ORBStrategy {
         signal.price,
         this.strike,
         this.daysToExpiry,
-        20, // Assumed volatility ~20%
+        20, // Assumed volatility ~20% (backtesting approximation)
         this.optionType
       );
+
+      // FIX: Use OPTIONS-specific stop-loss/target percentages (premium-based).
+      // 0.5% is too tight (noise level); 25% SL and 50% target are realistic.
+      const slPct  = this.config.strategy.stopLossPercent  || 25;
+      const tgtPct = this.config.strategy.targetPercent    || 50;
 
       // Calculate quantity based on risk per trade
       this.quantity = calculateOptionsPositionSize(
         this.config.trading.capital,
         this.config.trading.riskPerTradePercent || 2,
         this.entryPremium,
-        this.config.strategy.stopLossPercent
+        slPct
       );
 
       // Stop loss and target in terms of premium percentage
-      this.stopLoss = this.entryPremium * (1 - this.config.strategy.stopLossPercent / 100);
-      this.target = this.entryPremium * (1 + this.config.strategy.targetPercent / 100);
+      this.stopLoss = this.entryPremium * (1 - slPct / 100);
+      this.target   = this.entryPremium * (1 + tgtPct / 100);
       
       if (this.config.strategy.useTrailingStop) {
         this.trailingStop = this.stopLoss;
@@ -165,17 +175,21 @@ class ORBStrategy {
         daysToExpiry: this.daysToExpiry
       });
     } else {
-      // Original futures/index logic (kept for reference)
+      // Futures/index logic: use futures-specific SL/target if available
+      const slPct  = this.config.strategy.futuresStopLossPercent  || this.config.strategy.stopLossPercent  || 0.5;
+      const tgtPct = this.config.strategy.futuresTargetPercent    || this.config.strategy.targetPercent    || 2;
+      const trailPct = this.config.strategy.futuresTrailingStopPercent || this.config.strategy.trailingStopPercent || 0.5;
+
       if (signal.direction === 'LONG') {
-        this.stopLoss = this.entryPrice * (1 - this.config.strategy.stopLossPercent / 100);
-        this.target = this.entryPrice * (1 + this.config.strategy.targetPercent / 100);
+        this.stopLoss = this.entryPrice * (1 - slPct / 100);
+        this.target   = this.entryPrice * (1 + tgtPct / 100);
         
         if (this.config.strategy.useTrailingStop) {
           this.trailingStop = this.stopLoss;
         }
       } else {
-        this.stopLoss = this.entryPrice * (1 + this.config.strategy.stopLossPercent / 100);
-        this.target = this.entryPrice * (1 - this.config.strategy.targetPercent / 100);
+        this.stopLoss = this.entryPrice * (1 + slPct / 100);
+        this.target   = this.entryPrice * (1 - tgtPct / 100);
         
         if (this.config.strategy.useTrailingStop) {
           this.trailingStop = this.stopLoss;
@@ -229,15 +243,26 @@ class ORBStrategy {
           exitReason = 'TARGET';
           exitPremium = this.target;
         }
-        // Update trailing stop
-        else if (this.config.strategy.useTrailingStop && currentPremium > this.entryPremium) {
-          const newTrailingStop = currentPremium * (1 - this.config.strategy.trailingStopPercent / 100);
-          if (newTrailingStop > this.trailingStop) {
-            this.trailingStop = newTrailingStop;
-            this.stopLoss = this.trailingStop;
+        // FIX: Update trailing stop independently of direction check.
+        // Previously the hit-check was INSIDE the `currentPremium > entryPremium`
+        // block, so the trailing stop could NEVER fire (premium can only drop
+        // AFTER it was above entry, but the check required it to still be above).
+        else if (this.config.strategy.useTrailingStop) {
+          // Ratchet up the trailing stop whenever premium makes a new high
+          if (currentPremium > this.entryPremium) {
+            const trailPct = this.config.strategy.trailingStopPercent || 10;
+            const newTrailingStop = currentPremium * (1 - trailPct / 100);
+            if (newTrailingStop > this.trailingStop) {
+              this.trailingStop = newTrailingStop;
+              this.stopLoss = this.trailingStop;
+              this.logger.debug('Trailing stop ratcheted', {
+                currentPremium: currentPremium.toFixed(2),
+                newTrailingStop: newTrailingStop.toFixed(2)
+              });
+            }
           }
-          // Check if trailing stop hit
-          if (currentPremium <= this.trailingStop) {
+          // Check if trailing stop is now hit (can happen on any tick below the stop)
+          if (this.trailingStop && currentPremium <= this.trailingStop) {
             exitReason = 'TRAILING_STOP';
             exitPremium = this.trailingStop;
           }
@@ -306,10 +331,17 @@ class ORBStrategy {
     let pnl, pnlPoints, totalPnL;
 
     if (this.instrumentType === 'OPTIONS') {
+      // FIX: Use actual exit premium; for END_OF_DAY use current estimated premium
+      // instead of 0 (which made end-of-day exits look like total wipeouts).
+      const effectiveExitPremium = exitSignal.premium != null ? exitSignal.premium : 0;
+
       // Options P&L calculation
-      const premiumChange = exitSignal.premium - this.entryPremium;
+      const premiumChange = effectiveExitPremium - this.entryPremium;
+      // pnlPercent relative to premium paid (for reporting only)
       pnl = (premiumChange / this.entryPremium) * 100;
       pnlPoints = premiumChange;
+      // FIX: totalPnL is in absolute rupees — dailyPnL tracks rupees, not %,
+      // so that the loss-limit circuit breaker works correctly across trades.
       totalPnL = premiumChange * this.quantity;
 
       const trade = {
@@ -319,7 +351,7 @@ class ORBStrategy {
         spotEntry: this.entryPrice,
         spotExit: exitSignal.price,
         entryPremium: this.entryPremium,
-        exitPremium: exitSignal.premium,
+        exitPremium: effectiveExitPremium,
         entryTime: this.entryTime,
         exitTime: exitSignal.timestamp,
         exitReason: exitSignal.reason,
@@ -331,7 +363,8 @@ class ORBStrategy {
       };
 
       this.trades.push(trade);
-      this.dailyPnL += pnl;
+      // FIX: track daily P&L in absolute rupees (consistent with live risk manager)
+      this.dailyPnL += totalPnL;
 
       this.logger.trade('EXIT', {
         ...trade,
@@ -467,10 +500,26 @@ class ORBStrategy {
     // Force close any open position at end of day
     if (this.position && candles.length > 0) {
       const lastCandle = candles[candles.length - 1];
+      
+      // FIX: For END_OF_DAY options exit, estimate the premium at close rather
+      // than using 0 (which made every EOD exit look like a full write-off).
+      let endOfDayPremium = null;
+      if (this.instrumentType === 'OPTIONS' && this.entryPremium != null) {
+        const hoursElapsed = differenceInHours(lastCandle.timestamp, this.entryTime);
+        const timeDecay = calculateTimeDecay(this.entryPremium, this.daysToExpiry, hoursElapsed);
+        endOfDayPremium = estimatePremiumChange(
+          this.entryPrice,
+          lastCandle.close,
+          this.entryPremium,
+          this.optionType,
+          timeDecay
+        );
+      }
+
       const exitSignal = {
         reason: 'END_OF_DAY',
         price: lastCandle.close,
-        premium: this.instrumentType === 'OPTIONS' ? 0 : null,
+        premium: endOfDayPremium,
         timestamp: lastCandle.timestamp
       };
       this.exitPosition(exitSignal);

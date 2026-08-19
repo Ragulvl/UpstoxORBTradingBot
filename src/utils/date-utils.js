@@ -139,18 +139,48 @@ export function isMarketHours(date, config) {
          timeStr <= config.trading.marketClose;
 }
 
-export function isExpiryDay(date, instrument) {
-  // For now, simplified logic - expiry is typically last Thursday of the month
-  // Nifty weekly expiry: Thursday, BankNifty weekly expiry: Wednesday
-  const dayOfWeek = date.getDay();
-  
-  if (instrument === 'NIFTY') {
-    return dayOfWeek === 4; // Thursday
-  } else if (instrument === 'BANKNIFTY') {
-    return dayOfWeek === 3; // Wednesday
+/**
+ * Check whether a given date is an options expiry day.
+ *
+ * Previously this returned true for ALL Thursdays (NIFTY) or ALL Wednesdays
+ * (BANKNIFTY), causing the backtest to skip ~20% of trading days. That is wrong
+ * because expiry-day trading is legal and often has the highest volume.
+ *
+ * FIX: This function now honours the `skipExpiryDays` config flag.
+ * When `skipExpiryDays` is false (the default), we return false so ALL days
+ * including expiry days are traded. Set skipExpiryDays: true only if you
+ * explicitly want to avoid expiry-day gamma risk in the backtest.
+ *
+ * @param {Date}   date       - The date to check
+ * @param {string} instrument - 'NIFTY' or 'BANKNIFTY'
+ * @param {object} [config]   - Config object (reads config.backtest.skipExpiryDays)
+ * @returns {boolean} true if this is an expiry day AND the user wants to skip it
+ */
+export function isExpiryDay(date, instrument, config = null) {
+  // If caller did not opt in to skipping expiry days, always return false
+  const shouldSkip = config?.backtest?.skipExpiryDays === true;
+  if (!shouldSkip) {
+    return false;
   }
-  
+
+  const dayOfWeek = date.getDay();
+
+  if (instrument === 'NIFTY') {
+    return dayOfWeek === 4; // Thursday weekly expiry
+  } else if (instrument === 'BANKNIFTY') {
+    return dayOfWeek === 3; // Wednesday weekly expiry
+  }
+
   return false;
 }
 
 export { NSE_HOLIDAYS };
+
+// NSE Market Holidays 2027 — Update this list when NSE publishes the official calendar
+// Placeholder: add actual 2027 holiday dates here before the new year.
+const NSE_HOLIDAYS_2027 = [
+  // '2027-01-26', // Republic Day (likely, verify exact date)
+  // Add remaining 2027 holidays here
+];
+// NOTE: if you add 2027 holidays above, also add them to the NSE_HOLIDAYS spread.
+

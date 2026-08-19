@@ -36,6 +36,8 @@ export class BotEngine extends EventEmitter {
     this.costCalculator = components.costCalculator;
     this.tradeJournal = components.tradeJournal;
     this.riskManager = components.riskManager;
+    // FIX: upstoxClient was missing — needed by fetchPreviousDayData() for historical API fallback
+    this.upstoxClient = components.upstoxClient;
     
     // Initialize strategy
     this.strategy = new GoldenRatioStrategy(this.config, logger);
@@ -51,6 +53,10 @@ export class BotEngine extends EventEmitter {
     this.currentPosition = null;
     this.spotPrice = null;
     this.selectedInstrument = null;
+    
+    // Guard: prevents double-close race condition when stop_loss_hit event
+    // and candle update loop both trigger closePosition() simultaneously.
+    this._closingPosition = false;
     
     // Timers
     this.stateCheckInterval = null;
@@ -356,10 +362,22 @@ export class BotEngine extends EventEmitter {
     const orEndMin = openMin + openingRangeDuration;
     const orEndTime = `${openHour.toString().padStart(2, '0')}:${orEndMin.toString().padStart(2, '0')}`;
     
-    // Check if we have enough candles even if past OR time (for late starts)
-    const hasEnoughCandles = this.candleHistory.getRecentCandles(openingRangeDuration).length >= openingRangeDuration;
+    // FIX: Validate by timestamp span, not just candle count.
+    // A count check passes if 14 candles exist (14 minutes of data)
+    // even though we need 15 minutes for an accurate opening range.
+    const recentCandles = this.candleHistory.getRecentCandles(openingRangeDuration);
+    let hasEnoughData = false;
+    if (recentCandles.length >= openingRangeDuration) {
+      // Verify the candles actually span the required duration
+      const firstTs = recentCandles[0]?.timestamp;
+      const lastTs = recentCandles[recentCandles.length - 1]?.timestamp;
+      if (firstTs && lastTs) {
+        const spanMinutes = (new Date(lastTs) - new Date(firstTs)) / 60000;
+        hasEnoughData = spanMinutes >= openingRangeDuration - 1; // Allow 1-min tolerance
+      }
+    }
     
-    if ((currentTime >= orEndTime || hasEnoughCandles) && !this.openingRange) {
+    if ((currentTime >= orEndTime || hasEnoughData) && !this.openingRange) {
       await this.calculateOpeningRange();
       await this.transitionTo('MONITORING');
     }
@@ -685,11 +703,15 @@ export class BotEngine extends EventEmitter {
    * Handle stop loss hit
    */
   async onStopLossHit(position) {
+    // Guard: prevent double-close if candle loop already triggered closePosition
+    if (this._closingPosition) {
+      logger.debug('Stop loss event skipped — close already in progress');
+      return;
+    }
     logger.warn('Stop loss hit - closing position', {
       id: position.id,
       pnl: position.pnl
     });
-
     await this.closePosition('STOP_LOSS', position);
   }
 
@@ -697,11 +719,15 @@ export class BotEngine extends EventEmitter {
    * Handle target hit
    */
   async onTargetHit(position) {
+    // Guard: prevent double-close if candle loop already triggered closePosition
+    if (this._closingPosition) {
+      logger.debug('Target event skipped — close already in progress');
+      return;
+    }
     logger.info('Target hit - closing position', {
       id: position.id,
       pnl: position.pnl
     });
-
     await this.closePosition('TARGET', position);
   }
 
@@ -724,6 +750,13 @@ export class BotEngine extends EventEmitter {
     if (!pos) {
       return;
     }
+
+    // Guard: prevent double-close from simultaneous event + timer triggers
+    if (this._closingPosition) {
+      logger.warn('closePosition() called while already closing — ignoring duplicate', { reason });
+      return;
+    }
+    this._closingPosition = true;
 
     try {
       // Get current quote for exit (pass spot price for mock mode)
@@ -826,6 +859,7 @@ export class BotEngine extends EventEmitter {
 
       this.currentPosition = null;
       this.selectedInstrument = null;
+      this._closingPosition = false; // Release guard after clean close
 
       await this.transitionTo('MONITORING');
 
@@ -835,6 +869,7 @@ export class BotEngine extends EventEmitter {
       });
 
     } catch (error) {
+      this._closingPosition = false; // Always release guard, even on error
       logger.error('Failed to close position', {
         error: error.message,
         stack: error.stack

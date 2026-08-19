@@ -119,8 +119,8 @@ class EnhancedBacktestEngine {
     for (const day of tradingDays) {
       const dateStr = format(day, 'yyyy-MM-dd');
       
-      // Check if it's an expiry day
-      const isExpiry = isExpiryDay(day, instrument);
+      // Check if it's an expiry day (controlled by config.backtest.skipExpiryDays)
+      const isExpiry = isExpiryDay(day, instrument, this.config);
       if (isExpiry) {
         this.logger.info(`Skipping expiry day: ${dateStr}`);
         continue;
