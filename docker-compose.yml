@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # ── Live Trading Bot ─────────────────────────────────────────────────────────
+  bot:
+    image: upstox-orb-bot:latest
+    container_name: upstox-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    ports:
+      - "3000:3000"       # Dashboard
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Ensure graceful shutdown on Ctrl+C / SIGTERM
+    stop_grace_period: 30s
+
+  # ── Dashboard Only (separate service for monitoring without running bot) ──────
+  dashboard:
+    image: upstox-orb-bot:latest
+    container_name: upstox-dashboard
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    ports:
+      - "3001:3000"
+    command: ["node", "dashboard/server.js"]
+    profiles:
+      - dashboard-only    # Only starts with: docker compose --profile dashboard-only up

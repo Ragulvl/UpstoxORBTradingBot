@@ -323,8 +323,19 @@ app.get('/', (req, res) => {
 });
 
 /**
- * Start server
+ * Health check endpoint — used by Docker HEALTHCHECK and AWS load balancers
  */
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        memory: process.memoryUsage(),
+        version: process.env.npm_package_version || '1.0.0'
+    });
+});
+
+
 app.listen(PORT, () => {
     console.log('='.repeat(60));
     console.log('📊 Dashboard Server Started');

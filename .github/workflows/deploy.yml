@@ -1,0 +1,76 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # Allow manual trigger from GitHub UI
+
+jobs:
+  # ── Job 1: Test ───────────────────────────────────────────────────────────────
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  # ── Job 2: Deploy ─────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: test   # Only deploy if tests pass
+    # Only deploy on push to main (not on PRs)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}           # EC2 public IP
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}         # Contents of .pem file
+          port: 22
+          script: |
+            set -e
+            echo "=== Deploying Upstox ORB Bot ==="
+            cd /opt/upstox-bot
+
+            # Pull latest code
+            git pull origin main
+
+            # Install/update dependencies
+            npm install --omit=dev
+
+            # Run tests on EC2 to confirm nothing broke
+            npm test
+
+            # Restart the bot service gracefully
+            sudo systemctl restart upstox-bot
+            sleep 3
+
+            # Verify it started
+            sudo systemctl is-active --quiet upstox-bot && echo "✅ Bot service running" || echo "❌ Bot service failed"
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ Deployment to EC2 (${{ secrets.EC2_HOST }}) successful"
+          else
+            echo "❌ Deployment failed — check logs above"
+          fi
