@@ -62,7 +62,7 @@ class TelegramNotifier {
                  :             'LOW       [-25% size]';
 
     return this._send(
-`\`\`\`
+`
 SYSTEM ONLINE     ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
 ${'='.repeat(34)}
 Instrument  : ${instrument}
@@ -71,7 +71,7 @@ VIX Proxy   : ${vix ? vix.toFixed(1) : 'N/A'}
 Regime      : ${regime}
 Session     : 09:15 - 15:20 IST
 Status      : MONITORING
-\`\`\``);
+`);
   }
 
   /** Fired immediately on ENTRY */
@@ -85,7 +85,7 @@ Status      : MONITORING
       : '';
 
     return this._send(
-`\`\`\`
+`
 ORDER FILLED      ${this._time()}
 ${'='.repeat(34)}
 Side        : ${direction}
@@ -97,7 +97,7 @@ Deployed    : INR ${this._fmt(totalInvestment, 0)}
 Stop Loss   : INR ${this._fmt(stopLoss, 0)}
 Target      : INR ${this._fmt(target, 0)}
 VIX         : ${vixAtEntry ? vixAtEntry.toFixed(1) : 'N/A'}${sizeNote}
-\`\`\``);
+`);
   }
 
   /** Fired immediately on EXIT */
@@ -112,7 +112,7 @@ VIX         : ${vixAtEntry ? vixAtEntry.toFixed(1) : 'N/A'}${sizeNote}
     const pnlSign  = pnlPercent >= 0 ? '+' : '';
 
     return this._send(
-`\`\`\`
+`
 POSITION CLOSED   ${result}
 ${'='.repeat(34)}
 Instrument  : ${instrument} ${optionType} ${strike}
@@ -123,7 +123,7 @@ Exit        : INR ${this._fmt(exitPremium, 0)}
 Lots        : ${quantity}
 P&L         : ${pnlSign}${pnlPercent.toFixed(2)}%  (INR ${pnlSign}${this._fmt(totalPnL, 0)})
 Time        : ${this._time()}
-\`\`\``);
+`);
   }
 
   /** End-of-day summary */
@@ -143,7 +143,7 @@ Time        : ${this._time()}
     const stopLine= stoppedReason ? `Halted      : ${stoppedReason}` : '';
 
     return this._send(
-`\`\`\`
+`
 SESSION REPORT    ${date || new Date().toLocaleDateString('en-IN')}
 ${'='.repeat(34)}
 Instrument  : ${instrument} / ${strategy || 'ORB'}
@@ -158,7 +158,7 @@ Best        : +INR ${this._fmt(bestTrade, 0)}
 Worst       : -INR ${this._fmt(Math.abs(worstTrade), 0)}
 ${stopLine ? stopLine + '\n' : ''}${'─'.repeat(34)}
 Next        : ${new Date(Date.now() + 86400000).toLocaleDateString('en-IN')}  09:15 IST
-\`\`\``);
+`);
   }
 
   /** Critical alert */
@@ -168,12 +168,12 @@ Next        : ${new Date(Date.now() + 86400000).toLocaleDateString('en-IN')}  09
       .join('\n');
 
     return this._send(
-`\`\`\`
+`
 ALERT :: ${type}
 ${'='.repeat(34)}
 ${message}
 ${detailLines ? `${'─'.repeat(34)}\n${detailLines}\n` : ''}Time        : ${this._time()}
-\`\`\``);
+`);
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────────
@@ -223,9 +223,9 @@ ${detailLines ? `${'─'.repeat(34)}\n${detailLines}\n` : ''}Time        : ${thi
   _post(text) {
     return new Promise((resolve, reject) => {
       const body = JSON.stringify({
-        chat_id:    this.chatId,
-        text:       text,
-        parse_mode: 'Markdown'
+        chat_id: this.chatId,
+        text:    text
+        // No parse_mode — plain text renders cleanly without backtick artifacts
       });
 
       const options = {
