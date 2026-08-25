@@ -241,6 +241,33 @@ class LiveBotRunner {
   }
 
   /**
+   * Connect WebSocket with exponential backoff retry
+   */
+  async connectWebSocketWithRetry(maxAttempts = 5) {
+    let lastError;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        logger.info(`WebSocket connect attempt ${attempt}/${maxAttempts}`);
+        await this.components.wsClient.connect();
+        logger.info('✅ WebSocket connected');
+        return;
+      } catch (error) {
+        lastError = error;
+        logger.warn(`WebSocket connect attempt ${attempt} failed`, {
+          error: error.message,
+          status: error.response?.status
+        });
+        if (attempt < maxAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000); // exponential backoff, max 30s
+          logger.info(`Retrying WebSocket in ${delay / 1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    throw new Error(`WebSocket connection failed after ${maxAttempts} attempts: ${lastError?.message}`);
+  }
+
+  /**
    * Stop the bot gracefully
    */
   async stop() {
