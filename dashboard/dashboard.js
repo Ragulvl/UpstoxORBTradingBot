@@ -9,7 +9,7 @@
 // Configuration
 const CONFIG = {
     refreshInterval: 5000, // 5 seconds for real-time updates
-    apiBaseUrl: 'http://localhost:3000/api', // Will be served by simple server
+    apiBaseUrl: '/api',    // Relative URL — works on any host (trade.dinez.in or localhost)
     enableAutoRefresh: true
 };
 
