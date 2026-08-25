@@ -48,6 +48,12 @@ export class UpstoxWebSocketClient extends EventEmitter {
     this.mockSessionOpen = null; // Track session open for OHLC
     this.mockSessionHigh = null; // Track session high
     this.mockSessionLow = null; // Track session low
+
+    // ── Stale data detection ─────────────────────────────────────────────────
+    this.lastTickAt = null;           // Timestamp of most recent tick
+    this.stalenessThreshold = 60000;  // 60 s without a tick = stale
+    this.stalenessCheckMs = 30000;    // Check every 30 s
+    this.stalenessTimer = null;       // setInterval handle
   }
 
   /**
@@ -167,6 +173,9 @@ export class UpstoxWebSocketClient extends EventEmitter {
             if (this.subscriptions.size > 0) {
               this.resubscribe();
             }
+
+            // Start staleness watch
+            this.startStalenessWatch();
             
             this.emit('connected');
             resolve();
@@ -185,6 +194,7 @@ export class UpstoxWebSocketClient extends EventEmitter {
         this.ws.on('close', (code, reason) => {
           this.isConnected = false;
           this.stopHeartbeat();
+          this.stopStalenessWatch();
           
           // Clear the authorized URL - it's single-use
           this.authorizedWebSocketUrl = null;
@@ -231,11 +241,57 @@ export class UpstoxWebSocketClient extends EventEmitter {
       setTimeout(() => {
         this.isConnected = true;
         this.mockBasePrice = 22000; // Starting NIFTY price
+        this.startStalenessWatch();
         logger.info('Mock WebSocket connected successfully');
         this.emit('connected');
         resolve();
       }, 100);
     });
+  }
+
+  /**
+   * Start staleness watchdog.
+   * If no tick arrives within stalenessThreshold ms, emit 'stale' event.
+   * Only alerts when the market is expected to be open (between 09:00–15:35 IST).
+   */
+  startStalenessWatch() {
+    this.stopStalenessWatch(); // clear any existing timer
+    this.lastTickAt = Date.now(); // reset on (re)connect
+
+    this.stalenessTimer = setInterval(() => {
+      if (!this.isConnected) return;
+
+      // Only warn during expected market hours (09:00–15:35 IST)
+      const now = new Date();
+      const istHour = (now.getUTCHours() + 5) % 24 + (now.getUTCMinutes() >= 30 ? 0 : -1) + 5;
+      const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+      const istMinutes = (utcMinutes + 330) % 1440; // IST = UTC+5:30
+      const marketStart = 9 * 60;   // 09:00 IST
+      const marketEnd   = 15 * 60 + 35; // 15:35 IST
+
+      if (istMinutes < marketStart || istMinutes > marketEnd) return;
+
+      const msSinceLastTick = Date.now() - (this.lastTickAt || 0);
+      if (msSinceLastTick > this.stalenessThreshold) {
+        logger.error('🚨 STALE DATA: No tick received for ' + Math.round(msSinceLastTick / 1000) + 's — WebSocket may be silent', {
+          lastTickAt: this.lastTickAt ? new Date(this.lastTickAt).toISOString() : 'never',
+          thresholdSec: this.stalenessThreshold / 1000
+        });
+        this.emit('stale', { msSinceLastTick, lastTickAt: this.lastTickAt });
+      }
+    }, this.stalenessCheckMs);
+
+    logger.debug('Staleness watchdog started', {
+      thresholdSec: this.stalenessThreshold / 1000,
+      checkIntervalSec: this.stalenessCheckMs / 1000
+    });
+  }
+
+  stopStalenessWatch() {
+    if (this.stalenessTimer) {
+      clearInterval(this.stalenessTimer);
+      this.stalenessTimer = null;
+    }
   }
 
   /**
@@ -306,6 +362,7 @@ export class UpstoxWebSocketClient extends EventEmitter {
             });
           }
           
+          this.lastTickAt = Date.now(); // ← staleness watchdog heartbeat
           this.emit('tick', tick);
           
           // Buffer ticks for potential replay during reconnection

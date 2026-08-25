@@ -13,6 +13,7 @@ import LiveRiskManager from '../risk/live-risk-manager.js';
 import SessionManager from './session-manager.js';
 import BotEngine from './bot-engine.js';
 import StateExporter from './state-exporter.js';
+import PositionReconciler from './position-reconciler.js';
 
 /**
  * Main Live Bot Runner
@@ -193,6 +194,35 @@ class LiveBotRunner {
       logger.info('Connecting to Upstox WebSocket...');
       await this.connectWebSocketWithRetry();
       logger.info('✅ WebSocket connected');
+
+      // ── Safety Fix 1: Restart Recovery ───────────────────────────────────
+      // Reconcile broker positions with internal state to prevent double-positions
+      const reconciler = new PositionReconciler(
+        this.components.upstoxClient,
+        this.components.positionTracker
+      );
+      await reconciler.reconcile();
+
+      // ── Safety Fix 3: Stale Data Detection ──────────────────────────────
+      // If WebSocket goes silent during market hours, attempt reconnect
+      this.components.wsClient.on('stale', async ({ msSinceLastTick }) => {
+        logger.error('🚨 Stale feed detected — attempting WebSocket reconnect', {
+          silentFor: `${Math.round(msSinceLastTick / 1000)}s`
+        });
+        try {
+          await this.connectWebSocketWithRetry(3);
+          // Re-subscribe
+          const niftyKey = 'NSE_INDEX|Nifty 50';
+          const relianceKey = 'NSE_EQ|INE002A01018';
+          this.components.wsClient.subscribe([niftyKey, relianceKey]);
+          logger.info('✅ Reconnected after stale feed');
+        } catch (err) {
+          logger.error('Failed to reconnect after stale feed — activating kill switch', {
+            error: err.message
+          });
+          this.components.riskManager.emergencyStop('STALE_FEED');
+        }
+      });
 
       // Subscribe to multiple instruments for better tick coverage
       const underlying = this.config.trading.instruments[0] || 'NIFTY';
