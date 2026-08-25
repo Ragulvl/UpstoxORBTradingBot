@@ -65,11 +65,13 @@ function overrideFromEnv(config) {
   if (process.env.UPSTOX_ACCESS_TOKEN)   config.upstox.accessToken = process.env.UPSTOX_ACCESS_TOKEN;
 
   // Market data token (for WebSocket)
+  // Priority: UPSTOX_MARKET_DATA_TOKEN > UPSTOX_ACCESS_TOKEN > config.json
+  // NOTE: env vars ALWAYS win over stale config.json values
   if (!config.upstox.marketData) config.upstox.marketData = {};
   if (process.env.UPSTOX_MARKET_DATA_TOKEN) {
     config.upstox.marketData.accessToken = process.env.UPSTOX_MARKET_DATA_TOKEN;
-  } else if (process.env.UPSTOX_ACCESS_TOKEN && !config.upstox.marketData.accessToken) {
-    // Fallback: use main token for market data
+  } else if (process.env.UPSTOX_ACCESS_TOKEN) {
+    // Always prefer env token over potentially stale config.json token
     config.upstox.marketData.accessToken = process.env.UPSTOX_ACCESS_TOKEN;
   }
   if (process.env.UPSTOX_WEBSOCKET_URL) {
