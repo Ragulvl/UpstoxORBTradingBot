@@ -68,7 +68,7 @@ export class SessionManager {
       '2026-06-13', // Id-ul-Adha
       '2026-07-13', // Moharram
       '2026-08-15', // Independence Day
-      '2026-08-25', // Janmashtami
+      '2026-08-28', // Janmashtami (corrected date)
       '2026-09-02', // Ganesh Chaturthi
       '2026-09-12', // Id-e-Milad
       '2026-10-02', // Mahatma Gandhi Jayanti
