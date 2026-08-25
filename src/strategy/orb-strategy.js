@@ -424,12 +424,14 @@ class ORBStrategy {
   }
 
   shouldStopTrading() {
-    const lossLimit = this.config.trading.dailyLossLimitPercent;
-    
-    if (Math.abs(this.dailyPnL) >= lossLimit) {
-      this.logger.warn('Daily loss limit reached', {
-        dailyPnL: this.dailyPnL,
-        limit: lossLimit
+    const lossLimit = this.config.trading.dailyLossLimitPercent ?? 2;
+
+    // Only stop trading on a genuine LOSS — not on a profit
+    // dailyPnL is the sum of pnlPercent values for today's trades
+    if (this.dailyPnL < 0 && Math.abs(this.dailyPnL) >= lossLimit) {
+      this.logger.warn('Daily loss limit reached — halting trading for the day', {
+        dailyPnLPercent: this.dailyPnL.toFixed(2) + '%',
+        limitPercent: lossLimit + '%'
       });
       return true;
     }

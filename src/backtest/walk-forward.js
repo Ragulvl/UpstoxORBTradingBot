@@ -100,16 +100,32 @@ class WalkForwardBacktester {
         // Extract OOS (test) stats for each strategy
         const oosStats = {};
         for (const strategy of this.strategies) {
-          const s = results?.strategies?.[strategy];
-          if (!s) continue;
+          const stratData = results?.strategies?.[strategy];
+          if (!stratData) {
+            this.logger.warn(`No results for strategy ${strategy} in window ${i + 1}`);
+            continue;
+          }
+
+          // EnhancedBacktestEngine stores results under .testing.summary
+          // All numeric fields are string-encoded: '15.50%', '1.19', etc.
+          const s = stratData.testing?.summary;
+          if (!s) {
+            this.logger.warn(`No testing summary for ${strategy} in window ${i + 1}`);
+            continue;
+          }
+
+          const parsePercent = v => parseFloat((v ?? '0').toString().replace('%', '')) || 0;
+          const parseNum     = v => parseFloat((v ?? '0').toString()) || 0;
+
           oosStats[strategy] = {
-            // EnhancedBacktestEngine returns { train, test } sub-objects
-            return:      s.test?.totalReturn      ?? s.totalReturn      ?? 0,
-            trades:      s.test?.totalTrades       ?? s.totalTrades       ?? 0,
-            winRate:     s.test?.winRate           ?? s.winRate           ?? 0,
-            sharpe:      s.test?.sharpeRatio       ?? s.sharpeRatio       ?? 0,
-            maxDrawdown: s.test?.maxDrawdownPercent ?? s.maxDrawdownPercent ?? 0,
-            profitFactor:s.test?.profitFactor      ?? s.profitFactor      ?? 0
+            return:       parsePercent(s.totalPnLPercent),
+            trades:       s.totalTrades       ?? 0,
+            winRate:      parsePercent(s.winRate),
+            sharpe:       parseNum(s.sharpeRatio ?? 0),  // not always present
+            maxDrawdown:  parsePercent(s.maxDrawdown),
+            profitFactor: parseNum(s.profitFactor),
+            winningTrades: s.winningTrades    ?? 0,
+            losingTrades:  s.losingTrades     ?? 0
           };
         }
 
