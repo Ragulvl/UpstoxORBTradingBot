@@ -14,6 +14,7 @@ import SessionManager from './session-manager.js';
 import BotEngine from './bot-engine.js';
 import StateExporter from './state-exporter.js';
 import PositionReconciler from './position-reconciler.js';
+import TelegramNotifier from '../alerts/telegram-notifier.js';
 
 /**
  * Main Live Bot Runner
@@ -106,6 +107,9 @@ class LiveBotRunner {
         capital: this.components.riskManager.capital,
         dailyLossLimit: this.components.riskManager.dailyLossLimit
       });
+
+      // 10b. Initialize Telegram Notifier
+      this.components.telegram = new TelegramNotifier(this.config, logger);
 
       // 11. Initialize Candle Builder and History
       logger.info('Initializing candle builder...');
@@ -206,8 +210,11 @@ class LiveBotRunner {
       // ── Safety Fix 3: Stale Data Detection ──────────────────────────────
       // If WebSocket goes silent during market hours, attempt reconnect
       this.components.wsClient.on('stale', async ({ msSinceLastTick }) => {
-        logger.error('🚨 Stale feed detected — attempting WebSocket reconnect', {
-          silentFor: `${Math.round(msSinceLastTick / 1000)}s`
+        const silentFor = `${Math.round(msSinceLastTick / 1000)}s`;
+        logger.error('🚨 Stale feed detected — attempting WebSocket reconnect', { silentFor });
+        this.components.telegram?.sendAlert('STALE_DATA', 'Market feed went silent — reconnecting WebSocket', {
+          silentFor,
+          time: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })
         });
         try {
           await this.connectWebSocketWithRetry(3);
@@ -221,6 +228,9 @@ class LiveBotRunner {
             error: err.message
           });
           this.components.riskManager.emergencyStop('STALE_FEED');
+          this.components.telegram?.sendAlert('KILL_SWITCH', 'Reconnect failed — kill switch activated', {
+            reason: 'STALE_FEED', error: err.message
+          });
         }
       });
 
@@ -260,6 +270,14 @@ class LiveBotRunner {
       logger.info('='.repeat(60));
       logger.info('🤖 Bot is now live and monitoring market');
       logger.info('='.repeat(60));
+
+      // ── Telegram Heartbeat ────────────────────────────────────────────────
+      // Send 9:00 AM alive message to Telegram
+      const instrument = this.config.trading.instruments?.[0] || 'NIFTY';
+      await this.components.telegram?.sendHeartbeat({
+        capital:    this.config.trading.capital,
+        instrument
+      });
 
     } catch (error) {
       logger.error('❌ Failed to start bot', {
@@ -339,10 +357,28 @@ class LiveBotRunner {
         logger.info('✅ Post-market cleanup complete');
       }
 
-      // Generate final daily summary
+      // Generate final daily summary + send to Telegram
       if (this.components.tradeJournal) {
-        await this.components.tradeJournal.generateDailySummary();
+        const summary = await this.components.tradeJournal.generateDailySummary();
         logger.info('✅ Daily summary generated');
+
+        // Send EOD summary to Telegram
+        const riskStatus = this.components.riskManager?.getRiskStatus?.() || {};
+        const instrument = this.config?.trading?.instruments?.[0] || 'NIFTY';
+        await this.components.telegram?.sendEODSummary({
+          date:           new Date().toLocaleDateString('en-IN'),
+          instrument,
+          totalTrades:    riskStatus.tradesCount    || 0,
+          totalPnL:       riskStatus.dailyPnL       || 0,
+          totalPnLPercent:riskStatus.dailyPnLPercent|| 0,
+          capital:        this.config?.trading?.capital || 0,
+          finalCapital:   (this.config?.trading?.capital || 0) + (riskStatus.dailyPnL || 0),
+          winningTrades:  riskStatus.winningTrades  || 0,
+          losingTrades:   riskStatus.losingTrades   || 0,
+          stoppedReason:  riskStatus.killSwitchActivated ? 'Kill switch activated'
+                        : riskStatus.circuitBreakerTriggered ? 'Circuit breaker'
+                        : null
+        });
       }
 
       logger.info('='.repeat(60));
