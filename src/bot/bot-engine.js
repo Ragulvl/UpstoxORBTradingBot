@@ -36,8 +36,12 @@ export class BotEngine extends EventEmitter {
     this.costCalculator = components.costCalculator;
     this.tradeJournal = components.tradeJournal;
     this.riskManager = components.riskManager;
-    // FIX: upstoxClient was missing — needed by fetchPreviousDayData() for historical API fallback
+    // upstoxClient may be PaperBroker in paper trading mode — used for orders only
     this.upstoxClient = components.upstoxClient;
+    // dataClient is ALWAYS the real UpstoxClient — used for historical data / spot price
+    // Falls back to upstoxClient if realUpstoxClient not set (live mode)
+    this.dataClient = components.realUpstoxClient || components.upstoxClient;
+
     
     // Initialize strategy
     this.strategy = new GoldenRatioStrategy(this.config, logger);
@@ -278,7 +282,7 @@ export class BotEngine extends EventEmitter {
     if (!candles || candles.length === 0) {
       logger.info('Cache miss — fetching from historical API', { prevDateStr });
       try {
-        candles = await this.upstoxClient.getHistoricalData(
+        candles = await this.dataClient.getHistoricalData(
           underlying,
           '1minute',
           prevDateStr,
