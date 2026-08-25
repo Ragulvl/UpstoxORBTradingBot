@@ -12,7 +12,7 @@
     "capital": 100000,
     "dailyLossLimitPercent": 2,
     "maxTradesPerDay": 2,
-    "instruments": ["NIFTY", "BANKNIFTY"],
+    "instruments": ["NIFTY"],
     "marketOpen": "09:15",
     "marketClose": "15:30",
     "openingRangeDuration": 15,
@@ -41,6 +41,17 @@
     "interval": "1minute",
     "trainTestSplit": 0.7,
     "strategies": ["ORB", "GOLDEN_RATIO"]
+  },
+  "vixFilter": {
+    "enabled": true,
+    "comment": "India VIX thresholds — walk-forward validated for NIFTY ORB",
+    "optimalMin": 12,
+    "optimalMax": 20,
+    "elevatedMax": 25,
+    "elevatedSizeMultiplier": 0.5,
+    "haltAbove": 25,
+    "expiryDaySizeMultiplier": 0.5,
+    "nearExpiryDays": 1
   },
   "alerts": {
     "telegram": {

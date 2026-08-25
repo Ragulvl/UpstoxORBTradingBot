@@ -1,5 +1,6 @@
 import { format, addMinutes, isAfter, isBefore, differenceInHours } from 'date-fns';
 import { getMarketTime, toIST } from '../utils/date-utils.js';
+import { getSizingMultiplier, estimateVIXFromRange } from '../utils/vix-filter.js';
 import {
   getOptionStrike,
   estimateOptionPremium,
@@ -145,13 +146,51 @@ class ORBStrategy {
       const slPct  = this.config.strategy.stopLossPercent  || 25;
       const tgtPct = this.config.strategy.targetPercent    || 50;
 
-      // Calculate quantity based on risk per trade
-      this.quantity = calculateOptionsPositionSize(
+      // ── VIX Regime Filter + Gamma-Bomb Protection ───────────────────────
+      // Estimate VIX from the day's ORB width (backtesting proxy)
+      // In live trading, pass actual India VIX from this.config.liveVix
+      let estimatedVIX = this.config.liveVix ?? null;
+      if (estimatedVIX === null && this.openingRange) {
+        estimatedVIX = estimateVIXFromRange(
+          this.openingRange.high,
+          this.openingRange.low,
+          signal.price
+        );
+      }
+
+      const sizing = getSizingMultiplier(estimatedVIX, this.daysToExpiry);
+
+      if (!sizing.tradingAllowed) {
+        this.logger.warn('🛑 VIX HALT — entry blocked by regime filter', {
+          reason: sizing.reason,
+          vix: estimatedVIX,
+          daysToExpiry: this.daysToExpiry
+        });
+        // Roll back position state — do not enter
+        this.position = null;
+        this.entryPrice = null;
+        this.entryTime = null;
+        this.entryDirection = null;
+        return;
+      }
+
+      if (sizing.multiplier < 1) {
+        this.logger.info('⚠️  Position size reduced by regime/expiry filter', {
+          reason: sizing.reason,
+          multiplier: sizing.multiplier
+        });
+      }
+
+      // Calculate base quantity then apply multiplier
+      const baseQty = calculateOptionsPositionSize(
         this.config.trading.capital,
         this.config.trading.riskPerTradePercent || 2,
         this.entryPremium,
         slPct
       );
+      this.quantity = Math.max(1, Math.floor(baseQty * sizing.multiplier));
+      this.vixAtEntry = estimatedVIX;
+      this.sizingMultiplier = sizing.multiplier;
 
       // Stop loss and target in terms of premium percentage
       this.stopLoss = this.entryPremium * (1 - slPct / 100);
