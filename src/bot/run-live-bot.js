@@ -142,9 +142,14 @@ class LiveBotRunner {
         url: wsConfig.url
       });
 
-      // Connect WebSocket to Candle Builder
+      // Connect WebSocket to Candle Builder — filter to NIFTY index only
+      // Without this filter, RELIANCE ticks corrupt NIFTY candle OHLC values
+      const NIFTY_INSTRUMENT = 'NSE_INDEX|Nifty 50';
       this.components.wsClient.on('tick', (tick) => {
-        this.components.candleBuilder.processTick(tick);
+        const key = tick.instrumentKey || tick.instrument_key || tick.symbol || '';
+        if (key === NIFTY_INSTRUMENT) {
+          this.components.candleBuilder.processTick(tick);
+        }
       });
 
       logger.info('✅ WebSocket client initialized');
