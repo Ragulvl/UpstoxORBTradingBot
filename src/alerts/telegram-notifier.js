@@ -52,22 +52,26 @@ class TelegramNotifier {
 
   // ─── Public API ────────────────────────────────────────────────────────────
 
-  /** Bot is alive — sent at 9:00 AM every trading day */
+  /** Bot is alive -- sent at 9:00 AM every trading day */
   async sendHeartbeat(config = {}) {
     const { vix, capital, instrument = 'NIFTY' } = config;
-    const vixLine = vix ? `📈 Est. VIX: ${vix.toFixed(1)}` : '';
-    const regime  = vix >= 25 ? '🛑 HALTED'
-                  : vix >= 20 ? '⚠️  ELEVATED (50% size)'
-                  : vix >= 12 ? '✅ OPTIMAL'
-                  : '⬇️  LOW (75% size)';
+    const regime = !vix    ? 'UNKNOWN'
+                 : vix >= 25 ? 'HALT'
+                 : vix >= 20 ? 'ELEVATED  [-50% size]'
+                 : vix >= 12 ? 'OPTIMAL'
+                 :             'LOW       [-25% size]';
 
-    return this._send(`💓 *BOT ALIVE* — ${new Date().toLocaleDateString('en-IN')}
-─────────────────────
-🏦 Instrument: ${instrument}
-💰 Capital: ₹${this._fmt(capital)}
-${vixLine}
-🌡️ VIX Regime: ${regime}
-⏰ Market opens: 09:15 IST`);
+    return this._send(
+`\`\`\`
+SYSTEM ONLINE     ${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}
+${'='.repeat(34)}
+Instrument  : ${instrument}
+Capital     : INR ${this._fmt(capital, 0)}
+VIX Proxy   : ${vix ? vix.toFixed(1) : 'N/A'}
+Regime      : ${regime}
+Session     : 09:15 - 15:20 IST
+Status      : MONITORING
+\`\`\``);
   }
 
   /** Fired immediately on ENTRY */
@@ -76,21 +80,24 @@ ${vixLine}
             totalInvestment, stopLoss, target, daysToExpiry,
             instrument = 'NIFTY', vixAtEntry, sizingMultiplier } = trade;
 
-    const emoji  = direction === 'LONG' ? '🟢' : '🔴';
-    const dte    = daysToExpiry !== undefined ? `${parseFloat(daysToExpiry).toFixed(1)} DTE` : '';
-    const sizing = sizingMultiplier !== undefined && sizingMultiplier < 1
-      ? `\n⚡ Size reduced: ${Math.round(sizingMultiplier * 100)}% (VIX/expiry filter)`
+    const sizeNote = sizingMultiplier !== undefined && sizingMultiplier < 1
+      ? `\nSize Adj    : ${Math.round(sizingMultiplier * 100)}% (VIX/expiry filter)`
       : '';
 
-    return this._send(`${emoji} *${direction} ENTRY* — ${instrument}
-─────────────────────
-📋 ${optionType} ${strike} ${dte}
-💵 Premium: ₹${this._fmt(premium, 0)} × ${quantity} lots
-💰 Investment: ₹${this._fmt(totalInvestment, 0)}
-🛑 Stop Loss: ₹${this._fmt(stopLoss, 0)} premium
-🎯 Target: ₹${this._fmt(target, 0)} premium
-🌡️ VIX: ${vixAtEntry ? vixAtEntry.toFixed(1) : 'N/A'}${sizing}
-⏰ ${this._time()}`);
+    return this._send(
+`\`\`\`
+ORDER FILLED      ${this._time()}
+${'='.repeat(34)}
+Side        : ${direction}
+Instrument  : ${instrument} ${optionType} ${strike}
+DTE         : ${parseFloat(daysToExpiry ?? 0).toFixed(1)}
+Premium     : INR ${this._fmt(premium, 0)}
+Lots        : ${quantity}
+Deployed    : INR ${this._fmt(totalInvestment, 0)}
+Stop Loss   : INR ${this._fmt(stopLoss, 0)}
+Target      : INR ${this._fmt(target, 0)}
+VIX         : ${vixAtEntry ? vixAtEntry.toFixed(1) : 'N/A'}${sizeNote}
+\`\`\``);
   }
 
   /** Fired immediately on EXIT */
@@ -101,20 +108,25 @@ ${vixLine}
             exitReason, quantity,
             instrument = 'NIFTY' } = trade;
 
-    const win    = pnlPercent > 0;
-    const emoji  = win ? '✅' : (exitReason === 'STOP_LOSS' ? '🛑' : '🔚');
-    const pnlEmoji = win ? '📈' : '📉';
+    const result   = pnlPercent >= 0 ? 'PROFIT' : 'LOSS';
+    const pnlSign  = pnlPercent >= 0 ? '+' : '';
 
-    return this._send(`${emoji} *EXIT* — ${instrument} ${optionType} ${strike}
-─────────────────────
-${pnlEmoji} P&L: ${win ? '+' : ''}${pnlPercent.toFixed(2)}% (₹${win ? '+' : ''}${this._fmt(totalPnL, 0)})
-📋 ${direction} | ${exitReason}
-💵 Entry: ₹${this._fmt(entryPremium, 0)} → Exit: ₹${this._fmt(exitPremium, 0)}
-🔢 Qty: ${quantity} lots
-⏰ ${this._time()}`);
+    return this._send(
+`\`\`\`
+POSITION CLOSED   ${result}
+${'='.repeat(34)}
+Instrument  : ${instrument} ${optionType} ${strike}
+Side        : ${direction}
+Exit Reason : ${exitReason}
+Entry       : INR ${this._fmt(entryPremium, 0)}
+Exit        : INR ${this._fmt(exitPremium, 0)}
+Lots        : ${quantity}
+P&L         : ${pnlSign}${pnlPercent.toFixed(2)}%  (INR ${pnlSign}${this._fmt(totalPnL, 0)})
+Time        : ${this._time()}
+\`\`\``);
   }
 
-  /** End-of-day summary — call this at market close */
+  /** End-of-day summary */
   async sendEODSummary(stats) {
     const {
       date, instrument = 'NIFTY', strategy,
@@ -126,47 +138,42 @@ ${pnlEmoji} P&L: ${win ? '+' : ''}${pnlPercent.toFixed(2)}% (₹${win ? '+' : ''
       stoppedReason
     } = stats;
 
-    const pnlSign  = totalPnL >= 0 ? '+' : '';
-    const pnlEmoji = totalPnL >= 0 ? '📈' : '📉';
-    const wr       = winRate ?? (totalTrades > 0 ? Math.round(winningTrades / totalTrades * 100) : 0);
-    const stopLine = stoppedReason ? `\n⚠️ Stopped: ${stoppedReason}` : '';
+    const wr      = winRate ?? (totalTrades > 0 ? Math.round(winningTrades / totalTrades * 100) : 0);
+    const pnlSign = totalPnL >= 0 ? '+' : '';
+    const stopLine= stoppedReason ? `Halted      : ${stoppedReason}` : '';
 
-    return this._send(`📊 *END OF DAY — ${date || new Date().toLocaleDateString('en-IN')}*
-─────────────────────
-🏦 ${instrument} | ${strategy || 'ORB'}
-─────────────────────
-${pnlEmoji} Net P&L: ${pnlSign}₹${this._fmt(Math.abs(totalPnL), 0)} (${pnlSign}${parseFloat(totalPnLPercent).toFixed(2)}%)
-💰 Capital: ₹${this._fmt(capital, 0)} → ₹${this._fmt(finalCapital, 0)}
-─────────────────────
-📋 Trades: ${totalTrades} (✅${winningTrades} / ❌${losingTrades})
-🎯 Win Rate: ${wr}%
-📈 Best: +₹${this._fmt(bestTrade, 0)}
-📉 Worst: -₹${this._fmt(Math.abs(worstTrade), 0)}
-📉 Max Drawdown: ${parseFloat(maxDrawdown).toFixed(1)}%${stopLine}
-─────────────────────
-_Next session: Tomorrow 09:00 IST_`);
+    return this._send(
+`\`\`\`
+SESSION REPORT    ${date || new Date().toLocaleDateString('en-IN')}
+${'='.repeat(34)}
+Instrument  : ${instrument} / ${strategy || 'ORB'}
+${'─'.repeat(34)}
+Net P&L     : ${pnlSign}INR ${this._fmt(Math.abs(totalPnL), 0)}  (${pnlSign}${parseFloat(totalPnLPercent).toFixed(2)}%)
+Capital     : INR ${this._fmt(capital, 0)}  ->  INR ${this._fmt(finalCapital, 0)}
+${'─'.repeat(34)}
+Trades      : ${totalTrades}  [W:${winningTrades}  L:${losingTrades}]
+Win Rate    : ${wr}%
+Drawdown    : ${parseFloat(maxDrawdown).toFixed(2)}%
+Best        : +INR ${this._fmt(bestTrade, 0)}
+Worst       : -INR ${this._fmt(Math.abs(worstTrade), 0)}
+${stopLine ? stopLine + '\n' : ''}${'─'.repeat(34)}
+Next        : ${new Date(Date.now() + 86400000).toLocaleDateString('en-IN')}  09:15 IST
+\`\`\``);
   }
 
-  /** Critical alert — circuit breaker, kill switch, VIX halt */
+  /** Critical alert */
   async sendAlert(type, message, details = {}) {
-    const emoji = {
-      CIRCUIT_BREAKER: '⚡',
-      KILL_SWITCH:     '🚨',
-      VIX_HALT:        '🛑',
-      STALE_DATA:      '📡',
-      ERROR:           '💥',
-      DAILY_LOSS:      '🔴',
-    }[type] || '⚠️';
-
     const detailLines = Object.entries(details)
-      .map(([k, v]) => `  • ${k}: ${v}`)
+      .map(([k, v]) => `${String(k).padEnd(12)}: ${v}`)
       .join('\n');
 
-    return this._send(`${emoji} *${type}* ALERT
-─────────────────────
+    return this._send(
+`\`\`\`
+ALERT :: ${type}
+${'='.repeat(34)}
 ${message}
-${detailLines ? `\n${detailLines}` : ''}
-⏰ ${this._time()}`);
+${detailLines ? `${'─'.repeat(34)}\n${detailLines}\n` : ''}Time        : ${this._time()}
+\`\`\``);
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────────
