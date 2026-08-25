@@ -78,12 +78,16 @@ function overrideFromEnv(config) {
     config.upstox.marketData.websocketUrl = process.env.UPSTOX_WEBSOCKET_URL;
   }
 
-  // Sandbox orders credentials
+  // Orders/portfolio credentials
+  // Priority: UPSTOX_SANDBOX_ACCESS_TOKEN > UPSTOX_ACCESS_TOKEN > config.json
+  // NOTE: env vars ALWAYS win over stale config.json values
   if (!config.upstox.orders) config.upstox.orders = {};
   if (process.env.UPSTOX_SANDBOX_API_KEY)     config.upstox.orders.sandboxApiKey = process.env.UPSTOX_SANDBOX_API_KEY;
   if (process.env.UPSTOX_SANDBOX_API_SECRET)  config.upstox.orders.sandboxApiSecret = process.env.UPSTOX_SANDBOX_API_SECRET;
-  if (process.env.UPSTOX_SANDBOX_ACCESS_TOKEN) config.upstox.orders.accessToken = process.env.UPSTOX_SANDBOX_ACCESS_TOKEN;
-  else if (process.env.UPSTOX_ACCESS_TOKEN && !config.upstox.orders.accessToken) {
+  if (process.env.UPSTOX_SANDBOX_ACCESS_TOKEN) {
+    config.upstox.orders.accessToken = process.env.UPSTOX_SANDBOX_ACCESS_TOKEN;
+  } else if (process.env.UPSTOX_ACCESS_TOKEN) {
+    // Always prefer env token over potentially stale config.json token
     config.upstox.orders.accessToken = process.env.UPSTOX_ACCESS_TOKEN;
   }
 
