@@ -1,33 +1,94 @@
 /**
- * Dashboard Server
- * 
- * Simple Express server that:
- * 1. Serves the dashboard HTML/CSS/JS
- * 2. Provides API endpoints that READ from bot's logs/trade journal
- * 3. DOES NOT interact with bot's trading logic
+ * Dashboard Server — with Password Authentication
+ *
+ * All routes protected by session cookie.
+ * Set DASHBOARD_PASSWORD in .env to change the password (default: orb2026).
+ *
+ * Public (no auth): /health, /callback, /login, /logout
  */
 
 import express from 'express';
-import cors from 'cors';
-import fs from 'fs/promises';
-import path from 'path';
+import cors    from 'cors';
+import fs      from 'fs/promises';
+import path    from 'path';
+import crypto  from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
-const app = express();
+const app  = express();
 const PORT = 3000;
 
-// Middleware
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || 'orb2026';
+const SESSION_SECRET     = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const COOKIE_NAME        = 'orb_session';
+const VALID_TOKEN        = crypto.createHmac('sha256', SESSION_SECRET)
+                               .update(DASHBOARD_PASSWORD).digest('hex');
+
+function parseCookies(req) {
+  return Object.fromEntries(
+    (req.headers.cookie || '').split(';')
+      .map(c => c.trim().split('=').map(s => decodeURIComponent(s || '')))
+      .filter(([k]) => k)
+  );
+}
+
+function isAuthenticated(req) {
+  return parseCookies(req)[COOKIE_NAME] === VALID_TOKEN;
+}
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
+
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Auth guard
+const PUBLIC = ['/login', '/logout', '/health', '/callback'];
+app.use((req, res, next) => {
+  if (PUBLIC.some(p => req.path === p || req.path.startsWith(p + '?'))) return next();
+  if (isAuthenticated(req)) return next();
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Unauthorized' });
+  return res.redirect('/login');
+});
+
 app.use(express.static(__dirname));
 
+// ─── Login / Logout ───────────────────────────────────────────────────────────
+
+app.get('/login', (req, res) => {
+  if (isAuthenticated(req)) return res.redirect('/');
+  const err = req.query.error ? '<div style="color:#f87171;margin-bottom:14px;padding:10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:8px">Invalid password.</div>' : '';
+  res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ORB Bot Login</title><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet"><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Inter,sans-serif;background:#0a0b0e;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center}.card{background:#111318;border:1px solid #1e2330;border-radius:12px;padding:40px;width:100%;max-width:380px;box-shadow:0 25px 60px rgba(0,0,0,.5)}.logo{text-align:center;margin-bottom:28px}.icon{width:48px;height:48px;background:linear-gradient(135deg,#3b82f6,#1d4ed8);border-radius:12px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px}h1{font-size:20px;font-weight:600;color:#f1f5f9}p{font-size:13px;color:#64748b;margin-top:4px}label{display:block;font-size:12px;font-weight:500;color:#94a3b8;margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}input[type=password]{width:100%;padding:12px 14px;background:#0d0f14;border:1px solid #1e2330;border-radius:8px;color:#e2e8f0;font-size:15px;font-family:Inter,sans-serif;outline:none}input[type=password]:focus{border-color:#3b82f6}button{width:100%;padding:12px;margin-top:18px;background:linear-gradient(135deg,#3b82f6,#1d4ed8);border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:600;cursor:pointer}</style></head><body><div class="card"><div class="logo"><div class="icon"><svg width="22" height="22" viewBox="0 0 18 18" fill="none"><path d="M9 1.5L2 6v10.5h5V12h4v4.5h5V6Z" fill="currentColor"/></svg></div><h1>ORB Trading Bot</h1><p>Live Dashboard — Restricted Access</p></div>${err}<form method="POST" action="/login"><label for="pw">Password</label><input type="password" id="pw" name="password" autofocus autocomplete="current-password" placeholder="Dashboard password"><button type="submit">Access Dashboard</button></form></div></body></html>`);
+});
+
+app.post('/login', (req, res) => {
+  if (req.body.password === DASHBOARD_PASSWORD) {
+    res.setHeader('Set-Cookie', `${COOKIE_NAME}=${VALID_TOKEN}; HttpOnly; SameSite=Strict; Max-Age=43200; Path=/`);
+    return res.redirect('/');
+  }
+  res.redirect('/login?error=1');
+});
+
+app.post('/logout', (req, res) => {
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; HttpOnly; SameSite=Strict; Max-Age=0; Path=/`);
+  res.redirect('/login');
+});
+
+// Upstox OAuth callback
+app.get('/callback', (req, res) => {
+  const code = req.query.code;
+  if (!code) return res.status(400).send('No authorization code received.');
+  res.send(`<!DOCTYPE html><html><head><title>Auth Code</title><style>body{font-family:monospace;background:#0a0b0e;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#111318;border:1px solid #1e2330;border-radius:12px;padding:32px;max-width:600px;width:100%}h2{color:#3b82f6;margin-bottom:16px}code{background:#0d0f14;padding:12px;border-radius:8px;display:block;word-break:break-all;color:#22c55e}button{margin-top:16px;padding:10px 20px;background:#3b82f6;border:none;border-radius:8px;color:white;cursor:pointer}</style></head><body><div class="box"><h2>Authorization Code</h2><p style="margin-bottom:12px;color:#94a3b8">Copy and use on EC2:</p><code>${code}</code><button onclick="navigator.clipboard.writeText('${code}');this.textContent='Copied!'">Copy Code</button></div></body></html>`);
+});
+
 // Paths
-const LOGS_DIR = path.join(__dirname, '..', 'logs');
+const LOGS_DIR   = path.join(__dirname, '..', 'logs');
 const TRADES_DIR = path.join(LOGS_DIR, 'trades');
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR   = path.join(__dirname, '..', 'data');
 
 /**
  * API: Get bot status
@@ -315,43 +376,24 @@ function extractTimestamp(line) {
     return match ? match[1] : new Date().toISOString();
 }
 
-/**
- * Serve dashboard
- */
+// Serve dashboard (auth handled by middleware)
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-/**
- * Health check endpoint — used by Docker HEALTHCHECK and AWS load balancers
- */
+// Health check — always public
 app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString(),
-        memory: process.memoryUsage(),
-        version: process.env.npm_package_version || '1.0.0'
-    });
+    res.json({ status: 'ok', uptime: process.uptime(), timestamp: new Date().toISOString() });
 });
 
 
 app.listen(PORT, () => {
     console.log('='.repeat(60));
-    console.log('📊 Dashboard Server Started');
+    console.log('Dashboard Server Started — AUTH ENABLED');
     console.log('='.repeat(60));
-    console.log(`Dashboard URL: http://localhost:${PORT}`);
-    console.log(`API Base URL: http://localhost:${PORT}/api`);
-    console.log('');
-    console.log('Available endpoints:');
-    console.log('  GET  /api/status      - Bot status and current position');
-    console.log('  GET  /api/trades      - All trades from trade journal');
-    console.log('  GET  /api/performance - Performance metrics');
-    console.log('  GET  /api/health      - System health and errors');
-    console.log('  POST /api/kill-switch - Activate kill switch');
-    console.log('');
-    console.log('⚠️  Read-only dashboard - Does not control bot behavior');
-    console.log('Auto-refreshes every 30 seconds');
+    console.log(`URL      : http://localhost:${PORT}`);
+    console.log(`Password : ${DASHBOARD_PASSWORD}`);
+    console.log(`Session  : 12 hours`);
     console.log('='.repeat(60));
 });
 
