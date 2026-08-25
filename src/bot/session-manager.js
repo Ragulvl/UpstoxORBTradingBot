@@ -172,16 +172,20 @@ export class SessionManager {
       instruments: await this.checkInstruments()
     };
 
-    const allPassed = Object.values(checks).every(check => check === true);
+    // tradingDay is a WARNING only — bot starts and waits for next trading day
+    // Hard failures: credentials, connectivity, instruments
+    const criticalPassed = checks.credentials && checks.connectivity && checks.instruments;
     
-    if (allPassed) {
+    if (checks.tradingDay && criticalPassed) {
       logger.info('✅ All pre-market checks passed', checks);
+    } else if (!checks.tradingDay && criticalPassed) {
+      logger.warn('⚠️  Not a trading day — bot will start and wait for next trading session', checks);
     } else {
-      logger.error('❌ Pre-market checks failed', checks);
+      logger.error('❌ Pre-market checks failed (critical)', checks);
     }
 
     return {
-      passed: allPassed,
+      passed: criticalPassed,
       checks
     };
   }
