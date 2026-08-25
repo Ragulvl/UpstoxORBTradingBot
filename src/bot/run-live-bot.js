@@ -5,6 +5,7 @@ import { CandleBuilder, CandleHistory } from '../data/candle-builder.js';
 import InstrumentMaster from '../data/instrument-master.js';
 import OptionChainFetcher from '../data/option-chain.js';
 import UpstoxClient from '../data/upstox-client.js';
+import PaperBroker from '../execution/paper-broker.js';
 import OrderManager from '../execution/order-manager.js';
 import PositionTracker from './position-tracker.js';
 import CostCalculator from './cost-calculator.js';
@@ -15,6 +16,8 @@ import BotEngine from './bot-engine.js';
 import StateExporter from './state-exporter.js';
 import PositionReconciler from './position-reconciler.js';
 import TelegramNotifier from '../alerts/telegram-notifier.js';
+
+const IS_PAPER_TRADING = (process.env.PAPER_TRADING || '').toLowerCase() === 'true';
 
 /**
  * Main Live Bot Runner
@@ -62,16 +65,25 @@ class LiveBotRunner {
         instruments: this.components.instrumentMaster.instruments.size
       });
 
-      // 4. Initialize Upstox Client
-      logger.info('Initializing Upstox client...');
-      this.components.upstoxClient = new UpstoxClient(this.config, logger);
-      logger.info('✅ Upstox client initialized');
+      // 4. Initialize Upstox Client (or PaperBroker in paper trading mode)
+      if (IS_PAPER_TRADING) {
+        logger.info('📄 PAPER TRADING MODE — initializing PaperBroker (no real orders)');
+        this.components.upstoxClient = new PaperBroker(this.config, logger);
+        // Real UpstoxClient still used for market data (option chain, history)
+        this.components.realUpstoxClient = new UpstoxClient(this.config, logger);
+        logger.info('✅ PaperBroker initialized');
+      } else {
+        logger.info('Initializing Upstox client...');
+        this.components.upstoxClient = new UpstoxClient(this.config, logger);
+        this.components.realUpstoxClient = this.components.upstoxClient;
+        logger.info('✅ Upstox client initialized');
+      }
 
-      // 5. Initialize Option Chain Fetcher
+      // 5. Initialize Option Chain Fetcher (always uses real client for market data)
       logger.info('Initializing option chain fetcher...');
       this.components.optionChain = new OptionChainFetcher(
         this.config,
-        this.components.upstoxClient
+        this.components.realUpstoxClient
       );
       logger.info('✅ Option chain fetcher initialized');
 
@@ -149,6 +161,13 @@ class LiveBotRunner {
         const key = tick.instrumentKey || tick.instrument_key || tick.symbol || '';
         if (key === NIFTY_INSTRUMENT) {
           this.components.candleBuilder.processTick(tick);
+          // Feed live spot price into paper broker for realistic fill simulation
+          if (IS_PAPER_TRADING && tick.lastPrice) {
+            this.components.upstoxClient.setSpotPrice(tick.lastPrice);
+          }
+        } else if (IS_PAPER_TRADING && tick.lastPrice) {
+          // Feed option LTP into paper broker (for fill price on option orders)
+          this.components.upstoxClient.setOptionPrice(key, tick.lastPrice);
         }
       });
 
